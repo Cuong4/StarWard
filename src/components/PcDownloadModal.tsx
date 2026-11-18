@@ -10,8 +10,13 @@ export const PcDownloadModal: React.FC<PcDownloadModalProps> = ({ onClose }) => 
 
   const handleDownloadExe = () => {
     setDownloading(true);
+    const isRawGitHubRoot =
+      typeof window !== 'undefined' &&
+      Boolean((window as unknown as { __ghFallbackLoaded?: boolean }).__ghFallbackLoaded);
+    const exeUrl = isRawGitHubRoot ? './public/Starward-PC.exe' : './Starward-PC.exe';
+
     const link = document.createElement('a');
-    link.href = '/Starward-PC.exe';
+    link.href = exeUrl;
     link.download = 'Starward-Chien-Truong-Tinh-Ha-PC.exe';
     document.body.appendChild(link);
     link.click();

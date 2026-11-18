@@ -7,6 +7,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: './',
     plugins: [
       react(),
       tailwindcss(),
@@ -28,7 +29,7 @@ export default defineConfig(() => {
               stdio: 'inherit',
             });
           } catch (err) {
-            console.error('PC EXE build warning:', err);
+            console.error('PC EXE & GitHub Pages bundle warning:', err);
           }
         },
       },

@@ -1,0 +1,6 @@
+{
+  "name": "Starward",
+  "description": "A fast, tactile 2D arcade arena shooter with wave progression, dash physics, and procedural synth audio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

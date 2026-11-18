@@ -49,8 +49,14 @@ const COLORS = {
   prism: '#38BDF8',
   pulsar: '#E11D48',
   shardling: '#7DD3FC',
+  sniper: '#F43F5E',
+  bomber: '#F97316',
+  vortex: '#A855F7',
+  juggernaut: '#14B8A6',
   bossAegis: '#F43F5E',
   bossHydra: '#F59E0B',
+  bossValkyria: '#EC4899',
+  bossChronovore: '#6366F1',
   eliteRing: '#FBBF24',
   shard: '#FBBF24',
   repair: '#34D399',
@@ -64,6 +70,43 @@ interface LightningArc {
   color: string;
   life: number;
   maxLife: number;
+}
+
+type ConstructKind =
+  | 'solar_ring'
+  | 'phantom_turret'
+  | 'valkyrie_drill'
+  | 'titan_dome'
+  | 'lightning_pylon'
+  | 'gravity_well'
+  | 'nebula_mine'
+  | 'fire_wall'
+  | 'laser_gate'
+  | 'time_dome'
+  | 'colossal_orb'
+  | 'judgment_beam'
+  | 'traveling_blackhole'
+  | 'ricochet_blade'
+  | 'colossal_slash'
+  | 'enemy_telegraph_beam';
+
+interface FieldConstruct {
+  kind: ConstructKind;
+  x: number;
+  y: number;
+  x2: number;
+  y2: number;
+  vx: number;
+  vy: number;
+  angle: number;
+  radius: number;
+  life: number;
+  maxLife: number;
+  tickTimer: number;
+  damage: number;
+  color: string;
+  secondaryColor: string;
+  hitIds: Set<number>;
 }
 
 interface EngineCallbacks {
@@ -94,10 +137,12 @@ export class StarwardEngine {
 
   private heldKeys = new Set<string>();
   private mouseDown = false;
+  private rightMouseDown = false;
   private mouseX = 640;
   private mouseY = 360;
   private hasPointerAim = false;
   private dashBufferTimer = 0;
+  private pendingChargeRatio = 0;
 
   private currentSector: SectorTheme = SECTOR_THEMES[0];
   private warpTransitionTimer = 0;
@@ -123,13 +168,26 @@ export class StarwardEngine {
     dashMaxCooldown: 1.25,
     dashDirX: 0,
     dashDirY: -1,
+    dashStartX: 640,
+    dashStartY: 360,
     dashTickTimer: 0,
+    holdChargeTimer: 0,
+    isChargingDash: false,
+    ricochetVx: 0,
+    ricochetVy: 0,
+    ricochetLastBounceX: 640,
+    ricochetLastBounceY: 360,
+    ricochetBossCooldown: 0,
     invulnTimer: 0,
     hitFlash: 0,
     squashX: 1,
     squashY: 1,
-    shields: 3,
-    maxShields: 3,
+    hp: 300,
+    maxHp: 300,
+    hpRegenRate: 4,
+    outOfCombatTimer: 0,
+    shields: 300,
+    maxShields: 300,
     weapon: 'pulse' as WeaponType,
     weaponLevel: 1,
     damageMult: 1,
@@ -141,6 +199,8 @@ export class StarwardEngine {
     magnetRadius: 170,
     overdriveCharge: 0,
     overdriveTimer: 0,
+    overdriveMaxDuration: 10.0,
+    overdrivePulseTimer: 0,
     overdriveGainMult: 1,
   };
 
@@ -177,6 +237,7 @@ export class StarwardEngine {
   private enemies: Enemy[] = [];
   private dashGhosts: DashGhost[] = [];
   private lightningArcs: LightningArc[] = [];
+  private fieldConstructs: FieldConstruct[] = [];
   private playerBullets: PlayerBullet[] = [];
   private enemyBullets: EnemyBullet[] = [];
   private shards: Shard[] = [];
@@ -239,7 +300,8 @@ export class StarwardEngine {
   public triggerDash(): void {
     this.sound.unlock();
     if (this.gameState !== 'PLAYING') return;
-    this.dashBufferTimer = 0.16;
+    this.dashBufferTimer = 0.18;
+    this.pendingChargeRatio = 0;
   }
 
   private tryUnlockAchievement(id: string): void {
@@ -256,7 +318,7 @@ export class StarwardEngine {
   }
 
   private initPools(): void {
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 240; i++) {
       this.playerBullets.push({
         active: false,
         x: 0,
@@ -270,6 +332,7 @@ export class StarwardEngine {
         pierce: 0,
         homing: false,
         color: COLORS.bulletPlayerCore,
+        shape: 'bolt',
         hitEnemyIds: new Set<number>(),
       });
     }
@@ -281,8 +344,12 @@ export class StarwardEngine {
         vx: 0,
         vy: 0,
         life: 0,
+        maxLife: 4.5,
         radius: 5,
         color: COLORS.bulletEnemy,
+        damage: 24,
+        shape: 'lance',
+        destructible: false,
       });
     }
     for (let i = 0; i < 100; i++) {
@@ -311,7 +378,7 @@ export class StarwardEngine {
         maxLife: 11,
       });
     }
-    for (let i = 0; i < 420; i++) {
+    for (let i = 0; i < 460; i++) {
       this.particles.push({
         active: false,
         x: 0,
@@ -325,7 +392,7 @@ export class StarwardEngine {
         drag: 0.94,
       });
     }
-    for (let i = 0; i < 48; i++) {
+    for (let i = 0; i < 56; i++) {
       this.shockwaves.push({
         active: false,
         x: 0,
@@ -338,7 +405,7 @@ export class StarwardEngine {
         lineWidth: 2,
       });
     }
-    for (let i = 0; i < 56; i++) {
+    for (let i = 0; i < 64; i++) {
       this.floatingTexts.push({
         active: false,
         x: 0,
@@ -438,12 +505,18 @@ export class StarwardEngine {
   private handleBlur = (): void => {
     this.heldKeys.clear();
     this.mouseDown = false;
+    this.rightMouseDown = false;
+    this.player.isChargingDash = false;
+    this.player.holdChargeTimer = 0;
   };
 
   private handleVisibilityChange = (): void => {
     if (document.hidden) {
       this.heldKeys.clear();
       this.mouseDown = false;
+      this.rightMouseDown = false;
+      this.player.isChargingDash = false;
+      this.player.holdChargeTimer = 0;
       if (this.gameState === 'PLAYING') {
         this.pauseGame();
       }
@@ -474,7 +547,14 @@ export class StarwardEngine {
       if (e.button === 0) {
         this.mouseDown = true;
       } else if (e.button === 2) {
-        this.dashBufferTimer = 0.15;
+        this.rightMouseDown = true;
+        if (this.player.dashCooldown <= 0 && this.player.dashTimer <= 0) {
+          this.player.isChargingDash = true;
+          this.player.holdChargeTimer = 0;
+        } else {
+          this.dashBufferTimer = 0.16;
+          this.pendingChargeRatio = 0;
+        }
       }
     }
   };
@@ -482,6 +562,15 @@ export class StarwardEngine {
   private handleMouseUp = (e: MouseEvent): void => {
     if (e.button === 0) {
       this.mouseDown = false;
+    } else if (e.button === 2) {
+      this.rightMouseDown = false;
+      if (this.player.isChargingDash) {
+        const ratio = Math.min(1, this.player.holdChargeTimer / 1.05);
+        this.player.isChargingDash = false;
+        this.player.holdChargeTimer = 0;
+        this.pendingChargeRatio = ratio >= 0.2 ? ratio : 0;
+        this.dashBufferTimer = 0.2;
+      }
     }
   };
 
@@ -535,7 +624,13 @@ export class StarwardEngine {
       }
       if (e.code === kb.dash) {
         e.preventDefault();
-        this.dashBufferTimer = 0.16;
+        if (this.player.dashCooldown <= 0 && this.player.dashTimer <= 0) {
+          this.player.isChargingDash = true;
+          this.player.holdChargeTimer = 0;
+        } else {
+          this.dashBufferTimer = 0.16;
+          this.pendingChargeRatio = 0;
+        }
       }
     }
 
@@ -550,51 +645,76 @@ export class StarwardEngine {
   };
 
   private handleKeyUp = (e: KeyboardEvent): void => {
+    const kb = this.profile.keybinds;
     this.heldKeys.delete(e.code);
+    if (e.code === kb.dash && this.player.isChargingDash) {
+      const ratio = Math.min(1, this.player.holdChargeTimer / 1.05);
+      this.player.isChargingDash = false;
+      this.player.holdChargeTimer = 0;
+      this.pendingChargeRatio = ratio >= 0.2 ? ratio : 0;
+      this.dashBufferTimer = 0.2;
+    }
   };
 
   public startNewRun(): void {
     this.sound.unlock();
     this.heldKeys.clear();
     this.mouseDown = false;
+    this.rightMouseDown = false;
     this.dashBufferTimer = 0;
+    this.pendingChargeRatio = 0;
 
     this.mode = this.profile.selectedMode;
     this.shipId = this.profile.selectedShip;
     const ship = SHIPS[this.shipId] ?? SHIPS.vanguard;
     const h = this.profile.hangarLevels;
 
-    const maxShields =
-      this.mode === 'hardcore' ? 1 : ship.baseShields + (h.hull ?? 0);
+    const maxHp =
+      this.mode === 'hardcore' ? 100 : ship.baseHp + (h.hull ?? 0) * 45;
+    const hpRegen =
+      this.mode === 'hardcore' ? 0 : 4 + (h.hull ?? 0) * 2;
 
     this.player.x = this.width / 2;
     this.player.y = this.height / 2;
     this.player.vx = 0;
     this.player.vy = 0;
     this.player.angle = -Math.PI / 2;
+    this.player.radius = Math.round(14 * Math.min(1.35, ship.hullScale || 1));
     this.player.fireCooldown = 0;
     this.player.dashTimer = 0;
     this.player.dashCooldown = 0;
-    this.player.dashMaxCooldown = Math.max(0.55, 1.25 * (1 - (h.thruster ?? 0) * 0.06));
+    this.player.dashMaxCooldown = Math.max(0.45, 1.25 / (1 + (h.thruster ?? 0) * 0.05));
     this.player.dashTickTimer = 0;
+    this.player.holdChargeTimer = 0;
+    this.player.isChargingDash = false;
+    this.player.ricochetVx = 0;
+    this.player.ricochetVy = 0;
+    this.player.ricochetBossCooldown = 0;
     this.player.invulnTimer = 1.0;
     this.player.hitFlash = 0;
     this.player.squashX = 1;
     this.player.squashY = 1;
-    this.player.shields = maxShields;
-    this.player.maxShields = maxShields;
+    this.player.hp = maxHp;
+    this.player.maxHp = maxHp;
+    this.player.hpRegenRate = hpRegen;
+    this.player.outOfCombatTimer = 4.0;
+    this.player.shields = maxHp;
+    this.player.maxShields = maxHp;
     this.player.weapon = ship.defaultWeapon;
     this.player.weaponLevel = 1;
     this.player.damageMult = ship.damageMult * (1 + (h.firepower ?? 0) * 0.1);
-    this.player.fireRateMult = ship.fireRateMult * (1 + (h.firepower ?? 0) * 0.05);
-    this.player.speedMult = ship.speedMult * (1 + (h.thruster ?? 0) * 0.06);
+    this.player.fireRateMult = ship.fireRateMult * (1 + (h.firepower ?? 0) * 0.04);
+    this.player.speedMult = ship.speedMult * (1 + (h.thruster ?? 0) * 0.05);
     this.player.extraBarrels = 0;
     this.player.bonusPierce = 0;
     this.player.shockDash = false;
     this.player.magnetRadius = 175 * (1 + (h.magnet ?? 0) * 0.2);
-    this.player.overdriveCharge = (h.overdrive ?? 0) * 10;
+    // Overdrive always starts at 0% and charges ONLY by dealing damage to enemies
+    this.player.overdriveCharge = 0;
     this.player.overdriveTimer = 0;
-    this.player.overdriveGainMult = 1 + (h.overdrive ?? 0) * 0.12;
+    this.player.overdriveMaxDuration = 10.0;
+    this.player.overdrivePulseTimer = 0;
+    this.player.overdriveGainMult = 1 + (h.overdrive ?? 0) * 0.1;
 
     this.activeBoostTimers = {
       rapid_fire: 0,
@@ -620,6 +740,7 @@ export class StarwardEngine {
     this.enemies = [];
     this.dashGhosts = [];
     this.lightningArcs = [];
+    this.fieldConstructs = [];
     for (const b of this.playerBullets) b.active = false;
     for (const b of this.enemyBullets) b.active = false;
     for (const s of this.shards) s.active = false;
@@ -642,6 +763,9 @@ export class StarwardEngine {
     if (this.gameState !== 'PLAYING') return;
     this.heldKeys.clear();
     this.mouseDown = false;
+    this.rightMouseDown = false;
+    this.player.isChargingDash = false;
+    this.player.holdChargeTimer = 0;
     this.setState('PAUSED');
   }
 
@@ -654,8 +778,12 @@ export class StarwardEngine {
   public returnToTitle(): void {
     this.heldKeys.clear();
     this.mouseDown = false;
+    this.rightMouseDown = false;
+    this.player.isChargingDash = false;
+    this.player.holdChargeTimer = 0;
     this.enemies = [];
     this.lightningArcs = [];
+    this.fieldConstructs = [];
     for (const b of this.playerBullets) b.active = false;
     for (const b of this.enemyBullets) b.active = false;
     for (const s of this.shards) s.active = false;
@@ -674,34 +802,121 @@ export class StarwardEngine {
     if (this.gameState !== 'PLAYING') return;
     if (this.player.overdriveCharge < 100 || this.player.overdriveTimer > 0) return;
 
-    const hLevel = this.profile.hangarLevels.overdrive ?? 0;
     const ship = SHIPS[this.shipId] ?? SHIPS.vanguard;
-    this.player.overdriveCharge = 0;
-    this.player.overdriveTimer = 3.8 + hLevel * 0.25;
-    this.player.invulnTimer = Math.max(this.player.invulnTimer, this.player.overdriveTimer);
+    const p = this.player;
+    p.overdriveCharge = 0;
+    p.overdriveMaxDuration = 10.0;
+    p.overdriveTimer = 10.0;
+    p.overdrivePulseTimer = 0.05;
+    p.invulnTimer = Math.max(p.invulnTimer, 2.8);
 
     this.sound.playOverdrive();
-    this.addShake(11);
-    this.spawnShockwave(this.player.x, this.player.y, 280, ship.accentColor, 4.2);
-    this.spawnShockwave(this.player.x, this.player.y, 190, '#FDE68A', 2.8);
-    this.spawnFloatingText(this.player.x, this.player.y - 34, 'OVERDRIVE BÙNG NỔ!', '#FDE68A');
+    this.addShake(14);
+    this.spawnShockwave(p.x, p.y, 320, ship.accentColor, 4.8);
+    this.spawnShockwave(p.x, p.y, 210, ship.dashSecondaryColor, 3.2);
+    this.spawnFloatingText(
+      p.x,
+      p.y - 38,
+      `TUYỆT KỸ NỘ 10S: ${ship.overdriveEffectName.toUpperCase()}!`,
+      '#FDE68A'
+    );
 
     for (const eb of this.enemyBullets) {
       if (eb.active) {
-        this.spawnBurst(eb.x, eb.y, 3, '#FDE68A', 80);
+        this.spawnBurst(eb.x, eb.y, 4, ship.accentColor, 95);
         eb.active = false;
       }
     }
-    for (const e of this.enemies) {
-      if (e.spawnTimer > 0) continue;
-      const dx = e.x - this.player.x;
-      const dy = e.y - this.player.y;
-      const dist = Math.max(1, Math.hypot(dx, dy));
-      if (dist < 300) {
-        const force = e.isBoss ? 150 : 440;
-        e.vx += (dx / dist) * force;
-        e.vy += (dy / dist) * force;
-        e.hitFlash = 0.14;
+
+    // Immediate opening signature phenomenon for Mythic / Special Ships
+    if (this.shipId === 'hyperion') {
+      // Launch Hyperion into high-speed Pinball Wall-Ricochet Storm!
+      let launchAngle = p.angle;
+      if (Math.abs(Math.cos(launchAngle)) < 0.25) launchAngle += 0.42;
+      if (Math.abs(Math.sin(launchAngle)) < 0.25) launchAngle -= 0.42;
+      p.ricochetVx = Math.cos(launchAngle) * 1680;
+      p.ricochetVy = Math.sin(launchAngle) * 1680;
+      p.ricochetLastBounceX = p.x;
+      p.ricochetLastBounceY = p.y;
+      p.invulnTimer = 10.0; // Immortal during 10s wall-ricochet storm
+    } else if (this.shipId === 'celestia') {
+      this.fieldConstructs.push({
+        kind: 'judgment_beam',
+        x: p.x,
+        y: p.y,
+        x2: p.x + Math.cos(p.angle) * 1500,
+        y2: p.y + Math.sin(p.angle) * 1500,
+        vx: 0,
+        vy: 0,
+        angle: p.angle,
+        radius: 96,
+        life: 10.0,
+        maxLife: 10.0,
+        tickTimer: 0,
+        damage: 2.2 * p.damageMult,
+        color: ship.accentColor,
+        secondaryColor: ship.dashColor,
+        hitIds: new Set<number>(),
+      });
+    } else if (this.shipId === 'omega') {
+      this.fieldConstructs.push({
+        kind: 'colossal_orb',
+        x: p.x + Math.cos(p.angle) * 32,
+        y: p.y + Math.sin(p.angle) * 32,
+        x2: 0,
+        y2: 0,
+        vx: Math.cos(p.angle) * 280,
+        vy: Math.sin(p.angle) * 280,
+        angle: p.angle,
+        radius: 175,
+        life: 5.5,
+        maxLife: 5.5,
+        tickTimer: 0,
+        damage: 3.2 * p.damageMult,
+        color: ship.dashColor,
+        secondaryColor: ship.dashSecondaryColor,
+        hitIds: new Set<number>(),
+      });
+    } else if (this.shipId === 'leviathan') {
+      this.fieldConstructs.push({
+        kind: 'traveling_blackhole',
+        x: p.x + Math.cos(p.angle) * 38,
+        y: p.y + Math.sin(p.angle) * 38,
+        x2: 0,
+        y2: 0,
+        vx: Math.cos(p.angle) * 165,
+        vy: Math.sin(p.angle) * 165,
+        angle: p.angle,
+        radius: 185,
+        life: 6.5,
+        maxLife: 6.5,
+        tickTimer: 0,
+        damage: 2.8 * p.damageMult,
+        color: ship.dashColor,
+        secondaryColor: ship.dashSecondaryColor,
+        hitIds: new Set<number>(),
+      });
+    } else if (this.shipId === 'apocalypse') {
+      for (let s = -1; s <= 1; s++) {
+        const a = p.angle + s * 0.28;
+        this.fieldConstructs.push({
+          kind: 'colossal_slash',
+          x: p.x + Math.cos(a) * 28,
+          y: p.y + Math.sin(a) * 28,
+          x2: 0,
+          y2: 0,
+          vx: Math.cos(a) * 620,
+          vy: Math.sin(a) * 620,
+          angle: a,
+          radius: 250,
+          life: 2.6,
+          maxLife: 2.6,
+          tickTimer: 0,
+          damage: 3.8 * p.damageMult,
+          color: ship.accentColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
       }
     }
 
@@ -750,27 +965,31 @@ export class StarwardEngine {
         break;
       case 'shield_restore':
         if (this.mode !== 'hardcore') {
-          p.shields = Math.min(p.maxShields, p.shields + 2);
+          p.hp = Math.min(p.maxHp, p.hp + 140);
+          p.shields = p.hp;
         }
         this.spawnShockwave(p.x, p.y, 140, COLORS.playerShield, 3);
         break;
       case 'max_shield_up':
         if (this.mode !== 'hardcore') {
-          p.maxShields += 1;
-          p.shields = Math.min(p.maxShields, p.shields + 1);
+          p.maxHp += 80;
+          p.hp = Math.min(p.maxHp, p.hp + 80);
+          p.hpRegenRate += 3;
+          p.maxShields = p.maxHp;
+          p.shields = p.hp;
         } else {
-          p.damageMult *= 1.2;
+          p.damageMult *= 1.25;
         }
         break;
       case 'phase_turbine':
-        p.dashMaxCooldown = Math.max(0.42, p.dashMaxCooldown * 0.75);
+        p.dashMaxCooldown = Math.max(0.38, p.dashMaxCooldown * 0.75);
         p.speedMult *= 1.15;
         break;
       case 'shock_dash':
         p.shockDash = true;
         break;
       case 'overdrive_surge':
-        p.overdriveCharge = Math.min(100, p.overdriveCharge + 50);
+        p.overdriveCharge = Math.min(100, p.overdriveCharge + 35);
         p.overdriveGainMult *= 1.25;
         break;
       case 'weapon_spread':
@@ -818,7 +1037,7 @@ export class StarwardEngine {
     this.wave = waveNum;
     this.waveDefeated = 0;
     this.waveClearDelay = 0;
-    this.spawnCooldown = 0.45;
+    this.spawnCooldown = 0.5;
 
     this.pickNextSectorTheme(waveNum);
 
@@ -833,19 +1052,32 @@ export class StarwardEngine {
     const isBossWave = this.mode === 'boss_rush' || waveNum % 3 === 0;
 
     if (isBossWave) {
-      const bossIndex = this.mode === 'boss_rush' ? waveNum : Math.floor(waveNum / 3);
-      const bossType: EnemyType = bossIndex % 2 === 1 ? 'boss_aegis' : 'boss_hydra';
-      const bossTitle = bossType === 'boss_aegis' ? 'PHÁO ĐÀI AEGIS' : 'XÀ VƯƠNG MẶT TRỜI';
+      const bossIndex = (this.mode === 'boss_rush' ? waveNum : Math.floor(waveNum / 3)) - 1;
+      const bossRotation: EnemyType[] = [
+        'boss_aegis',
+        'boss_hydra',
+        'boss_valkyria',
+        'boss_chronovore',
+      ];
+      const bossType = bossRotation[((bossIndex % 4) + 4) % 4];
+      const bossTitle =
+        bossType === 'boss_aegis'
+          ? 'PHÁO ĐÀI AEGIS'
+          : bossType === 'boss_hydra'
+          ? 'XÀ VƯƠNG MẶT TRỜI'
+          : bossType === 'boss_valkyria'
+          ? 'NỮ HOÀNG KIẾM KHÍ VALKYRIA'
+          : 'CHÚA TỂ HƯ KHÔNG CHRONOVORE';
       this.waveBanner = `CẢNH BÁO BOSS · ${bossTitle}`;
       this.waveBannerTimer = 2.5;
       this.sound.playBossWarning();
 
       const queue: { type: EnemyType; isElite: boolean }[] = [{ type: bossType, isElite: false }];
-      const escortCount = Math.min(2 + Math.floor(waveNum * 0.6), 7);
-      const escortPool: EnemyType[] = ['chaser', 'shooter', 'drifter', 'charger'];
+      const escortCount = Math.min(2 + Math.floor(waveNum * 0.35), 4);
+      const escortPool: EnemyType[] = ['chaser', 'sniper', 'drifter', 'vortex'];
       for (let i = 0; i < escortCount; i++) {
         const t = escortPool[i % escortPool.length];
-        queue.push({ type: t, isElite: i === 0 && waveNum >= 3 });
+        queue.push({ type: t, isElite: i === 0 && waveNum >= 4 });
       }
       this.waveSpawnQueue = queue;
       this.waveTotalEnemies = queue.length;
@@ -855,18 +1087,23 @@ export class StarwardEngine {
     this.waveBanner = `ĐỢT ${String(waveNum).padStart(2, '0')} · ${this.currentSector.name}`;
     this.waveBannerTimer = 2.1;
 
+    // Streamlined enemy counts per wave so combat is crisp and never visually cluttered
     const queue: { type: EnemyType; isElite: boolean }[] = [];
-    const drifterCount = 3 + Math.min(waveNum * 2, 10);
-    const chaserCount = 2 + Math.min(Math.floor(waveNum * 1.4), 9);
-    const shooterCount = waveNum >= 1 ? Math.min(1 + Math.floor(waveNum * 0.9), 6) : 0;
-    const tankCount = waveNum >= 2 ? Math.min(Math.floor(waveNum * 0.75), 5) : 1;
-    const chargerCount = waveNum >= 2 ? Math.min(Math.floor(waveNum * 0.7), 5) : 0;
-    const prismCount = waveNum >= 2 ? Math.min(Math.floor((waveNum - 1) * 0.8), 4) : 0;
-    const pulsarCount = waveNum >= 4 ? Math.min(Math.floor((waveNum - 2) * 0.7), 4) : 0;
+    const drifterCount = 2 + Math.min(waveNum, 6);
+    const chaserCount = 2 + Math.min(Math.floor(waveNum * 0.8), 5);
+    const shooterCount = waveNum >= 1 ? Math.min(1 + Math.floor(waveNum * 0.5), 3) : 0;
+    const sniperCount = waveNum >= 2 ? Math.min(Math.floor(waveNum * 0.5), 3) : 0;
+    const tankCount = waveNum >= 2 ? Math.min(Math.floor(waveNum * 0.45), 2) : 1;
+    const chargerCount = waveNum >= 2 ? Math.min(Math.floor(waveNum * 0.5), 3) : 0;
+    const bomberCount = waveNum >= 3 ? Math.min(Math.floor((waveNum - 1) * 0.45), 2) : 0;
+    const prismCount = waveNum >= 3 ? Math.min(Math.floor((waveNum - 1) * 0.45), 2) : 0;
+    const vortexCount = waveNum >= 4 ? Math.min(Math.floor((waveNum - 2) * 0.45), 2) : 0;
+    const pulsarCount = waveNum >= 4 ? Math.min(Math.floor((waveNum - 2) * 0.4), 2) : 0;
+    const juggernautCount = waveNum >= 5 ? Math.min(Math.floor((waveNum - 3) * 0.4), 2) : 0;
 
     const addEntries = (type: EnemyType, count: number) => {
       for (let i = 0; i < count; i++) {
-        const eliteChance = waveNum >= 2 ? Math.min(0.08 + waveNum * 0.025, 0.28) : 0;
+        const eliteChance = waveNum >= 2 ? Math.min(0.08 + waveNum * 0.022, 0.25) : 0;
         queue.push({ type, isElite: Math.random() < eliteChance });
       }
     };
@@ -874,10 +1111,14 @@ export class StarwardEngine {
     addEntries('drifter', drifterCount);
     addEntries('chaser', chaserCount);
     addEntries('shooter', shooterCount);
+    addEntries('sniper', sniperCount);
     addEntries('tank', tankCount);
     addEntries('charger', chargerCount);
+    addEntries('bomber', bomberCount);
     addEntries('prism', prismCount);
+    addEntries('vortex', vortexCount);
     addEntries('pulsar', pulsarCount);
+    addEntries('juggernaut', juggernautCount);
 
     for (let i = queue.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -951,14 +1192,12 @@ export class StarwardEngine {
       return;
     }
 
-    // Update active boost timers
     (Object.keys(this.activeBoostTimers) as BoostType[]).forEach((bType) => {
       if (this.activeBoostTimers[bType] > 0) {
         this.activeBoostTimers[bType] = Math.max(0, this.activeBoostTimers[bType] - dt);
       }
     });
 
-    // Update lightning arcs
     for (let i = this.lightningArcs.length - 1; i >= 0; i--) {
       this.lightningArcs[i].life -= dt;
       if (this.lightningArcs[i].life <= 0) {
@@ -966,13 +1205,17 @@ export class StarwardEngine {
       }
     }
 
-    const warpMult = this.warpTransitionTimer > 0 ? 1 + (this.warpTransitionTimer / this.warpMaxDuration) * 6 : 1;
+    const warpMult =
+      this.warpTransitionTimer > 0
+        ? 1 + (this.warpTransitionTimer / this.warpMaxDuration) * 6
+        : 1;
     this.updateStars(
       dt,
       (-this.player.vx * 0.06 + 14) * warpMult,
       (-this.player.vy * 0.06 - 6) * warpMult
     );
     this.updatePlayer(dt);
+    this.updateFieldConstructs(dt);
     this.updateWaveSpawning(dt);
     this.updatePlayerBullets(dt);
     this.updateEnemies(dt);
@@ -1040,79 +1283,128 @@ export class StarwardEngine {
     }
   }
 
-  private executeShipDashEffect(): void {
+  private executeShipDashEffect(chargeRatio = 0): void {
     const p = this.player;
     const ship = SHIPS[this.shipId] ?? SHIPS.vanguard;
-    const powerScale = p.shockDash ? 1.75 : 1.0;
+    const isCharged = chargeRatio >= 0.35;
+    const chargeBoost = 1 + chargeRatio * 1.5;
+    const powerScale = (p.shockDash ? 1.55 : 1.0) * chargeBoost;
     const dmg = p.damageMult * powerScale;
+    const dashAngle = Math.atan2(p.dashDirY, p.dashDirX);
 
-    this.spawnShockwave(p.x, p.y, 75 * powerScale, ship.dashColor, 2.8);
-    this.spawnShockwave(p.x, p.y, 45 * powerScale, ship.dashSecondaryColor, 1.8);
-    this.spawnBurst(p.x, p.y, 14, ship.dashColor, 210);
-    this.spawnBurst(p.x, p.y, 8, ship.dashSecondaryColor, 160);
+    this.spawnShockwave(p.x, p.y, 75 * powerScale, ship.dashColor, isCharged ? 4.2 : 2.8);
+    this.spawnShockwave(p.x, p.y, 45 * powerScale, ship.dashSecondaryColor, 2.0);
+    this.spawnBurst(p.x, p.y, isCharged ? 24 : 14, ship.dashColor, 240);
+
+    if (isCharged) {
+      this.addShake(8);
+      this.spawnFloatingText(
+        p.x,
+        p.y - 34,
+        `BÙNG PHÁ TỤ LỰC ${Math.round(chargeRatio * 100)}%!`,
+        '#FDE047'
+      );
+    }
 
     switch (ship.dashStyle) {
       case 'solar_flare': {
-        const count = p.shockDash ? 8 : 4;
-        for (let i = 0; i < count; i++) {
-          const a = p.angle + (i * Math.PI * 2) / count;
-          this.spawnPlayerProjectile(
-            p.x,
-            p.y,
-            a,
-            680,
-            1.1 * dmg,
-            1,
-            false,
-            ship.dashColor,
-            5
-          );
-        }
+        // 1. Vanguard: Rotating Solar Shield Ring attached to player
+        this.fieldConstructs.push({
+          kind: 'solar_ring',
+          x: p.x,
+          y: p.y,
+          x2: 0,
+          y2: 0,
+          vx: 0,
+          vy: 0,
+          angle: 0,
+          radius: 76 * powerScale,
+          life: 3.2 * (isCharged ? 1.5 : 1),
+          maxLife: 3.2 * (isCharged ? 1.5 : 1),
+          tickTimer: 0,
+          damage: 1.45 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
         break;
       }
 
       case 'void_lightning': {
-        const count = p.shockDash ? 10 : 6;
-        for (let i = 0; i < count; i++) {
-          const spread = ((i / (count - 1)) - 0.5) * 0.9;
-          this.spawnPlayerProjectile(
-            p.x,
-            p.y,
-            p.angle + spread,
-            960,
-            0.95 * dmg,
-            3,
-            false,
-            ship.dashColor,
-            4.2
-          );
+        // 2. Phantom: Hologram Turret Clone at origin (or 3 clones when charged!)
+        const count = isCharged ? 3 : 1;
+        for (let c = 0; c < count; c++) {
+          const offsetA = (c * Math.PI * 2) / count;
+          const dist = c === 0 ? 0 : 48;
+          this.fieldConstructs.push({
+            kind: 'phantom_turret',
+            x: p.dashStartX + Math.cos(offsetA) * dist,
+            y: p.dashStartY + Math.sin(offsetA) * dist,
+            x2: 0,
+            y2: 0,
+            vx: 0,
+            vy: 0,
+            angle: p.angle,
+            radius: 26,
+            life: 4.2 * (isCharged ? 1.35 : 1),
+            maxLife: 4.2 * (isCharged ? 1.35 : 1),
+            tickTimer: 0.08 * c,
+            damage: 1.15 * dmg,
+            color: ship.dashColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
         }
         break;
       }
 
       case 'crimson_lance': {
-        const blades = p.shockDash ? 5 : 3;
-        for (let i = 0; i < blades; i++) {
-          const spread = ((i / (blades - 1)) - 0.5) * 0.36;
-          this.spawnPlayerProjectile(
-            p.x + Math.cos(p.angle) * 14,
-            p.y + Math.sin(p.angle) * 14,
-            p.angle + spread,
-            880,
-            1.75 * dmg,
-            4,
-            false,
-            ship.dashColor,
-            6.5
-          );
+        // 3. Valkyrie: Crimson Drill Lance attached to player that pierces & steals HP
+        this.fieldConstructs.push({
+          kind: 'valkyrie_drill',
+          x: p.x,
+          y: p.y,
+          x2: 0,
+          y2: 0,
+          vx: 0,
+          vy: 0,
+          angle: dashAngle,
+          radius: 56 * powerScale,
+          life: 0.55 * (isCharged ? 1.4 : 1),
+          maxLife: 0.55 * (isCharged ? 1.4 : 1),
+          tickTimer: 0,
+          damage: 2.35 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
+        if (isCharged) {
+          this.fieldConstructs.push({
+            kind: 'colossal_slash',
+            x: p.x,
+            y: p.y,
+            x2: 0,
+            y2: 0,
+            vx: Math.cos(dashAngle) * 620,
+            vy: Math.sin(dashAngle) * 620,
+            angle: dashAngle,
+            radius: 145,
+            life: 1.8,
+            maxLife: 1.8,
+            tickTimer: 0,
+            damage: 2.5 * dmg,
+            color: ship.dashColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
         }
-        this.spawnFloatingText(p.x, p.y - 26, 'HUYẾT KIẾM!', ship.dashColor);
         break;
       }
 
       case 'bastion_wave': {
+        // 4. Titan: Hexagonal Gravity Fortress Dome + Earthquake slam
         const blastR = 195 * powerScale;
-        this.spawnShockwave(p.x, p.y, blastR, ship.dashColor, 4.2);
+        this.spawnShockwave(p.x, p.y, blastR, ship.dashColor, 4.5);
         for (let i = this.enemies.length - 1; i >= 0; i--) {
           const e = this.enemies[i];
           if (e.spawnTimer > 0) continue;
@@ -1120,166 +1412,787 @@ export class StarwardEngine {
           const dy = e.y - p.y;
           const d = Math.max(1, Math.hypot(dx, dy));
           if (d <= blastR + e.radius) {
-            const push = e.isBoss ? 140 : 520;
-            this.damageEnemy(i, 2.2 * dmg, (dx / d) * push, (dy / d) * push);
+            const push = e.isBoss ? 140 : 540;
+            this.damageEnemy(i, 2.4 * dmg, (dx / d) * push, (dy / d) * push);
           }
         }
+        this.fieldConstructs.push({
+          kind: 'titan_dome',
+          x: p.x,
+          y: p.y,
+          x2: 0,
+          y2: 0,
+          vx: 0,
+          vy: 0,
+          angle: 0,
+          radius: 118 * powerScale,
+          life: 3.8 * (isCharged ? 1.5 : 1),
+          maxLife: 3.8 * (isCharged ? 1.5 : 1),
+          tickTimer: 0,
+          damage: 1.3 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
         break;
       }
 
       case 'ion_tempest': {
-        const range = 260 * powerScale;
-        for (const eb of this.enemyBullets) {
-          if (eb.active && Math.hypot(eb.x - p.x, eb.y - p.y) < 135) {
-            this.spawnBurst(eb.x, eb.y, 3, ship.dashColor, 90);
-            eb.active = false;
-          }
-        }
-        let struck = 0;
-        const maxTargets = p.shockDash ? 8 : 5;
-        for (let i = this.enemies.length - 1; i >= 0 && struck < maxTargets; i--) {
-          const e = this.enemies[i];
-          if (e.spawnTimer > 0) continue;
-          const d = Math.hypot(e.x - p.x, e.y - p.y);
-          if (d <= range) {
-            struck++;
-            this.lightningArcs.push({
-              x1: p.x,
-              y1: p.y,
-              x2: e.x,
-              y2: e.y,
-              color: ship.dashColor,
-              life: 0.25,
-              maxLife: 0.25,
-            });
-            this.damageEnemy(i, 1.85 * dmg, 0, 0);
-          }
+        // 5. Tempest: Lightning Pylon tethered to player with high-voltage electric cable
+        const pylonCount = isCharged ? 2 : 1;
+        for (let k = 0; k < pylonCount; k++) {
+          const offset = k === 0 ? 0 : 75;
+          this.fieldConstructs.push({
+            kind: 'lightning_pylon',
+            x: p.dashStartX + Math.cos(dashAngle + Math.PI / 2) * offset,
+            y: p.dashStartY + Math.sin(dashAngle + Math.PI / 2) * offset,
+            x2: p.x,
+            y2: p.y,
+            vx: 0,
+            vy: 0,
+            angle: 0,
+            radius: 26,
+            life: 4.2 * (isCharged ? 1.35 : 1),
+            maxLife: 4.2 * (isCharged ? 1.35 : 1),
+            tickTimer: 0,
+            damage: 1.75 * dmg,
+            color: ship.dashColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
         }
         break;
       }
 
       case 'shadow_rift': {
-        let absorbed = 0;
-        const absorbR = 175 * powerScale;
-        for (const eb of this.enemyBullets) {
-          if (eb.active && Math.hypot(eb.x - p.x, eb.y - p.y) <= absorbR) {
-            eb.active = false;
-            absorbed++;
-            this.spawnBurst(eb.x, eb.y, 4, ship.dashColor, 100);
-          }
-        }
-        if (absorbed > 0) {
-          p.overdriveCharge = Math.min(100, p.overdriveCharge + absorbed * 4.5);
-          this.spawnFloatingText(
-            p.x,
-            p.y - 26,
-            `HẤP THỤ +${Math.round(absorbed * 4.5)}% OVERDRIVE`,
-            ship.dashSecondaryColor
-          );
-        }
-        for (let i = this.enemies.length - 1; i >= 0; i--) {
-          const e = this.enemies[i];
-          if (e.spawnTimer > 0) continue;
-          const d = Math.hypot(e.x - p.x, e.y - p.y);
-          if (d <= absorbR) {
-            this.damageEnemy(i, 1.65 * dmg, 0, 0);
-          }
-        }
+        // 6. Eclipse: Stationary Black Hole Gravity Well that pulls enemies & swallows bullets
+        this.fieldConstructs.push({
+          kind: 'gravity_well',
+          x: p.dashStartX,
+          y: p.dashStartY,
+          x2: 0,
+          y2: 0,
+          vx: 0,
+          vy: 0,
+          angle: 0,
+          radius: 155 * powerScale,
+          life: 3.6 * (isCharged ? 1.4 : 1),
+          maxLife: 3.6 * (isCharged ? 1.4 : 1),
+          tickTimer: 0,
+          damage: 1.6 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
         break;
       }
 
       case 'supernova_burst': {
-        const missiles = p.shockDash ? 10 : 6;
-        for (let i = 0; i < missiles; i++) {
-          const a = (i * Math.PI * 2) / missiles;
-          this.spawnPlayerProjectile(
-            p.x,
-            p.y,
-            a,
-            560,
-            1.2 * dmg,
-            1,
-            true,
-            ship.dashColor,
-            4.8
-          );
+        // 7. Nova: Drops Magnetic Proximity Nebula Mines along the dash path
+        const mineCount = isCharged ? 8 : 4;
+        for (let m = 0; m < mineCount; m++) {
+          const t = m / Math.max(1, mineCount - 1);
+          const mx = p.dashStartX + p.dashDirX * 165 * t + (Math.random() - 0.5) * 28;
+          const my = p.dashStartY + p.dashDirY * 165 * t + (Math.random() - 0.5) * 28;
+          this.fieldConstructs.push({
+            kind: 'nebula_mine',
+            x: mx,
+            y: my,
+            x2: 0,
+            y2: 0,
+            vx: (Math.random() - 0.5) * 40,
+            vy: (Math.random() - 0.5) * 40,
+            angle: 0,
+            radius: 22 * (isCharged ? 1.35 : 1),
+            life: 5.5,
+            maxLife: 5.5,
+            tickTimer: 0,
+            damage: 2.6 * dmg,
+            color: ship.dashColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
         }
         break;
       }
 
       case 'golden_phoenix': {
-        const count = p.shockDash ? 14 : 10;
-        for (let i = 0; i < count; i++) {
-          const a = (i * Math.PI * 2) / count;
-          this.spawnPlayerProjectile(
-            p.x,
-            p.y,
-            a,
-            640,
-            1.3 * dmg,
-            2,
-            false,
-            ship.dashColor,
-            5.2
-          );
-        }
+        // 8. Solaris: Blazing Thermonuclear Fire Wall Carpet along dash path
+        this.fieldConstructs.push({
+          kind: 'fire_wall',
+          x: p.dashStartX,
+          y: p.dashStartY,
+          x2: p.dashStartX + p.dashDirX * 210,
+          y2: p.dashStartY + p.dashDirY * 210,
+          vx: 0,
+          vy: 0,
+          angle: dashAngle,
+          radius: 40 * powerScale,
+          life: 4.2 * (isCharged ? 1.4 : 1),
+          maxLife: 4.2 * (isCharged ? 1.4 : 1),
+          tickTimer: 0,
+          damage: 1.75 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
         break;
       }
 
       case 'prism_mirror': {
-        const beams = p.shockDash ? 12 : 8;
-        for (let i = 0; i < beams; i++) {
-          const a = p.angle + (i * Math.PI * 2) / beams;
-          this.spawnPlayerProjectile(
-            p.x,
-            p.y,
-            a,
-            1080,
-            1.5 * dmg,
-            5,
-            false,
-            ship.dashColor,
-            5.0
-          );
+        // 9. Aether: Dual Prism Crystals connected by a persistent Emerald Laser Cutter Gate
+        this.fieldConstructs.push({
+          kind: 'laser_gate',
+          x: p.dashStartX,
+          y: p.dashStartY,
+          x2: p.dashStartX + p.dashDirX * 225,
+          y2: p.dashStartY + p.dashDirY * 225,
+          vx: 0,
+          vy: 0,
+          angle: dashAngle,
+          radius: 26 * powerScale,
+          life: 4.5 * (isCharged ? 1.4 : 1),
+          maxLife: 4.5 * (isCharged ? 1.4 : 1),
+          tickTimer: 0,
+          damage: 2.1 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
+        if (isCharged) {
+          this.fieldConstructs.push({
+            kind: 'judgment_beam',
+            x: p.x,
+            y: p.y,
+            x2: p.x + Math.cos(p.angle) * 1400,
+            y2: p.y + Math.sin(p.angle) * 1400,
+            vx: 0,
+            vy: 0,
+            angle: p.angle,
+            radius: 48,
+            life: 0.75,
+            maxLife: 0.75,
+            tickTimer: 0,
+            damage: 2.8 * dmg,
+            color: ship.dashColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
         }
         break;
       }
 
       case 'chrono_warp': {
-        const chronoR = 260 * powerScale;
-        this.spawnShockwave(p.x, p.y, chronoR, ship.dashColor, 3.6);
-        for (const eb of this.enemyBullets) {
-          if (eb.active && Math.hypot(eb.x - p.x, eb.y - p.y) <= chronoR) {
-            eb.vx *= 0.25;
-            eb.vy *= 0.25;
-          }
-        }
-        for (const e of this.enemies) {
-          if (e.spawnTimer <= 0 && Math.hypot(e.x - p.x, e.y - p.y) <= chronoR) {
-            e.vx *= 0.2;
-            e.vy *= 0.2;
-          }
-        }
-        const bolts = p.shockDash ? 10 : 8;
-        for (let i = 0; i < bolts; i++) {
-          const a = (i * Math.PI * 2) / bolts;
-          this.spawnPlayerProjectile(
-            p.x,
-            p.y,
-            a,
-            720,
-            1.35 * dmg,
-            2,
-            true,
-            ship.dashColor,
-            4.8
-          );
-        }
-        if (p.overdriveTimer <= 0) {
-          p.overdriveCharge = Math.min(100, p.overdriveCharge + 12);
-        }
-        this.spawnFloatingText(p.x, p.y - 28, 'NGƯNG ĐỌNG THỜI KHÔNG!', ship.dashSecondaryColor);
+        // 10. Chronos: Time-Stasis Bubble Dome freezing enemies & bullets inside by 85%
+        this.fieldConstructs.push({
+          kind: 'time_dome',
+          x: p.dashStartX + p.dashDirX * 70,
+          y: p.dashStartY + p.dashDirY * 70,
+          x2: 0,
+          y2: 0,
+          vx: 0,
+          vy: 0,
+          angle: 0,
+          radius: 195 * powerScale,
+          life: 4.0 * (isCharged ? 1.4 : 1),
+          maxLife: 4.0 * (isCharged ? 1.4 : 1),
+          tickTimer: 0,
+          damage: 1.35 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
         break;
+      }
+
+      case 'omega_burst': {
+        // 11. Omega-X: Launches a Colossal Antimatter Sphere (up to 220px when charged!)
+        const aimA = this.hasPointerAim ? p.angle : dashAngle;
+        this.fieldConstructs.push({
+          kind: 'colossal_orb',
+          x: p.x + Math.cos(aimA) * 26,
+          y: p.y + Math.sin(aimA) * 26,
+          x2: 0,
+          y2: 0,
+          vx: Math.cos(aimA) * 320,
+          vy: Math.sin(aimA) * 320,
+          angle: aimA,
+          radius: 85 * powerScale,
+          life: 4.5,
+          maxLife: 4.5,
+          tickTimer: 0,
+          damage: 3.1 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
+        break;
+      }
+
+      case 'starlight_step': {
+        // 12. Celestia: Instantaneous Judgment Mega-Laser Column + Heal
+        const aimA = this.hasPointerAim ? p.angle : dashAngle;
+        const healAmt = isCharged ? 35 : 18;
+        if (this.mode !== 'hardcore' && p.hp < p.maxHp) {
+          p.hp = Math.min(p.maxHp, p.hp + healAmt);
+          p.shields = p.hp;
+          this.spawnFloatingText(p.x, p.y - 26, `+${healAmt} HP ÁNH SÁNG`, '#34D399');
+        }
+        this.fieldConstructs.push({
+          kind: 'judgment_beam',
+          x: p.x,
+          y: p.y,
+          x2: p.x + Math.cos(aimA) * 1450,
+          y2: p.y + Math.sin(aimA) * 1450,
+          vx: 0,
+          vy: 0,
+          angle: aimA,
+          radius: 52 * powerScale,
+          life: isCharged ? 1.25 : 0.65,
+          maxLife: isCharged ? 1.25 : 0.65,
+          tickTimer: 0,
+          damage: 3.4 * dmg,
+          color: ship.accentColor,
+          secondaryColor: ship.dashColor,
+          hitIds: new Set<number>(),
+        });
+        break;
+      }
+
+      case 'abyss_tide': {
+        // 13. Leviathan: Traveling Black Hole Singularity Orb that vacuums enemies along its path
+        const aimA = this.hasPointerAim ? p.angle : dashAngle;
+        this.fieldConstructs.push({
+          kind: 'traveling_blackhole',
+          x: p.x + Math.cos(aimA) * 28,
+          y: p.y + Math.sin(aimA) * 28,
+          x2: 0,
+          y2: 0,
+          vx: Math.cos(aimA) * 185,
+          vy: Math.sin(aimA) * 185,
+          angle: aimA,
+          radius: 105 * powerScale,
+          life: 4.6,
+          maxLife: 4.6,
+          tickTimer: 0,
+          damage: 2.75 * dmg,
+          color: ship.dashColor,
+          secondaryColor: ship.dashSecondaryColor,
+          hitIds: new Set<number>(),
+        });
+        break;
+      }
+
+      case 'ricochet_blade': {
+        // 14. Hyperion: Launches High-Speed Wall-Bouncing Light Shurikens (2 normal, 6 when Hold-Q charged!)
+        const aimA = this.hasPointerAim ? p.angle : dashAngle;
+        const bladeCount = isCharged ? 6 : 2;
+        for (let b = 0; b < bladeCount; b++) {
+          const spread = (b - (bladeCount - 1) * 0.5) * 0.36;
+          const a = aimA + spread;
+          this.fieldConstructs.push({
+            kind: 'ricochet_blade',
+            x: p.x + Math.cos(a) * 24,
+            y: p.y + Math.sin(a) * 24,
+            x2: p.x,
+            y2: p.y,
+            vx: Math.cos(a) * 860,
+            vy: Math.sin(a) * 860,
+            angle: a,
+            radius: 34 * (isCharged ? 1.35 : 1),
+            life: 4.8,
+            maxLife: 4.8,
+            tickTimer: 0,
+            damage: 2.6 * dmg,
+            color: ship.accentColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
+        }
+        break;
+      }
+
+      case 'dimension_slash': {
+        // 15. Apocalypse: Giant 3D Excalibur Dimension Crescent Wave (3 waves + Golden Beam when Charged!)
+        const aimA = this.hasPointerAim ? p.angle : dashAngle;
+        const slashCount = isCharged ? 3 : 1;
+        for (let s = 0; s < slashCount; s++) {
+          const offset = (s - (slashCount - 1) * 0.5) * 0.28;
+          const a = aimA + offset;
+          this.fieldConstructs.push({
+            kind: 'colossal_slash',
+            x: p.x + Math.cos(a) * 30,
+            y: p.y + Math.sin(a) * 30,
+            x2: 0,
+            y2: 0,
+            vx: Math.cos(a) * 580,
+            vy: Math.sin(a) * 580,
+            angle: a,
+            radius: 155 * powerScale,
+            life: 2.4,
+            maxLife: 2.4,
+            tickTimer: 0,
+            damage: 3.8 * dmg,
+            color: ship.accentColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
+        }
+        break;
+      }
+    }
+  }
+
+  private distToSegment(
+    px: number,
+    py: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number
+  ): number {
+    const l2 = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+    if (l2 === 0) return Math.hypot(px - x1, py - y1);
+    let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+  }
+
+  private updateFieldConstructs(dt: number): void {
+    const p = this.player;
+    const minX = this.arenaPad + 16;
+    const maxX = this.width - this.arenaPad - 16;
+    const minY = this.arenaPad + 16;
+    const maxY = this.height - this.arenaPad - 16;
+
+    for (let i = this.fieldConstructs.length - 1; i >= 0; i--) {
+      const c = this.fieldConstructs[i];
+      c.life -= dt;
+      if (c.life <= 0) {
+        if (c.kind === 'colossal_orb' || c.kind === 'traveling_blackhole') {
+          this.spawnShockwave(c.x, c.y, c.radius * 1.6, c.color, 4);
+          this.spawnBurst(c.x, c.y, 24, c.secondaryColor, 260);
+        }
+        this.fieldConstructs.splice(i, 1);
+        continue;
+      }
+
+      c.tickTimer -= dt;
+
+      switch (c.kind) {
+        case 'solar_ring': {
+          c.x = p.x;
+          c.y = p.y;
+          c.angle += dt * 5.2;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius + 10) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 3, c.secondaryColor, 90);
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.16;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius + e.radius) {
+                this.damageEnemy(j, c.damage * 0.45, 0, 0);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'phantom_turret': {
+          if (c.tickTimer <= 0 && this.enemies.length > 0) {
+            c.tickTimer = 0.28;
+            let nearest: Enemy | null = null;
+            let bestD = 540;
+            for (const e of this.enemies) {
+              if (e.spawnTimer > 0) continue;
+              const d = Math.hypot(e.x - c.x, e.y - c.y);
+              if (d < bestD) {
+                bestD = d;
+                nearest = e;
+              }
+            }
+            if (nearest) {
+              c.angle = Math.atan2(nearest.y - c.y, nearest.x - c.x);
+              this.spawnPlayerProjectile(
+                c.x,
+                c.y,
+                c.angle,
+                920,
+                c.damage * 0.65,
+                2,
+                false,
+                c.color,
+                4.2
+              );
+            }
+          }
+          break;
+        }
+
+        case 'valkyrie_drill': {
+          c.x = p.x + Math.cos(p.angle) * 20;
+          c.y = p.y + Math.sin(p.angle) * 20;
+          c.angle = p.angle;
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.09;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius + e.radius) {
+                this.damageEnemy(j, c.damage * 0.65, Math.cos(c.angle) * 180, Math.sin(c.angle) * 180);
+                if (this.mode !== 'hardcore' && p.hp < p.maxHp) {
+                  p.hp = Math.min(p.maxHp, p.hp + 8);
+                  p.shields = p.hp;
+                }
+              }
+            }
+          }
+          break;
+        }
+
+        case 'titan_dome': {
+          c.angle += dt * 1.5;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 3, c.color, 70);
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.35;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius + e.radius) {
+                const dx = e.x - c.x;
+                const dy = e.y - c.y;
+                const d = Math.max(1, Math.hypot(dx, dy));
+                this.damageEnemy(j, c.damage * 0.5, (dx / d) * 180, (dy / d) * 180);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'lightning_pylon': {
+          c.x2 = p.x;
+          c.y2 = p.y;
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.14;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer > 0) continue;
+              const d = this.distToSegment(e.x, e.y, c.x, c.y, c.x2, c.y2);
+              if (d <= e.radius + 20) {
+                this.damageEnemy(j, c.damage * 0.55, 0, 0);
+                this.lightningArcs.push({
+                  x1: c.x,
+                  y1: c.y,
+                  x2: e.x,
+                  y2: e.y,
+                  color: c.color,
+                  life: 0.15,
+                  maxLife: 0.15,
+                });
+              }
+            }
+          }
+          break;
+        }
+
+        case 'gravity_well': {
+          c.angle += dt * 4.5;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 2, c.color, 60);
+            }
+          }
+          for (const e of this.enemies) {
+            if (e.spawnTimer > 0 || e.isBoss) continue;
+            const dx = c.x - e.x;
+            const dy = c.y - e.y;
+            const d = Math.hypot(dx, dy);
+            if (d > 10 && d <= c.radius * 1.35) {
+              e.vx += (dx / d) * 520 * dt;
+              e.vy += (dy / d) * 520 * dt;
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.22;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius) {
+                this.damageEnemy(j, c.damage * 0.45, 0, 0);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'nebula_mine': {
+          c.x += c.vx * dt;
+          c.y += c.vy * dt;
+          c.vx *= Math.exp(-3 * dt);
+          c.vy *= Math.exp(-3 * dt);
+          c.angle += dt * 3;
+
+          let triggered = false;
+          for (const e of this.enemies) {
+            if (e.spawnTimer > 0) continue;
+            const d = Math.hypot(e.x - c.x, e.y - c.y);
+            if (d < 150) {
+              c.x += ((e.x - c.x) / Math.max(1, d)) * 280 * dt;
+              c.y += ((e.y - c.y) / Math.max(1, d)) * 280 * dt;
+            }
+            if (d <= c.radius + e.radius + 8) {
+              triggered = true;
+              break;
+            }
+          }
+          if (triggered) {
+            const blastR = c.radius * 4.5;
+            this.spawnShockwave(c.x, c.y, blastR, c.color, 3.4);
+            this.spawnBurst(c.x, c.y, 18, c.color, 210);
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= blastR + e.radius) {
+                this.damageEnemy(j, c.damage, 0, 0);
+              }
+            }
+            this.fieldConstructs.splice(i, 1);
+            continue;
+          }
+          break;
+        }
+
+        case 'fire_wall':
+        case 'laser_gate': {
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.14;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer > 0) continue;
+              const d = this.distToSegment(e.x, e.y, c.x, c.y, c.x2, c.y2);
+              if (d <= c.radius + e.radius) {
+                this.damageEnemy(j, c.damage * 0.55, 0, 0);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'time_dome': {
+          c.angle += dt * 0.9;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius) {
+              eb.x -= eb.vx * dt * 0.82;
+              eb.y -= eb.vy * dt * 0.82;
+            }
+          }
+          for (const e of this.enemies) {
+            if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius) {
+              e.x -= e.vx * dt * 0.78;
+              e.y -= e.vy * dt * 0.78;
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.28;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius) {
+                this.damageEnemy(j, c.damage * 0.4, 0, 0);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'colossal_orb': {
+          c.x += c.vx * dt;
+          c.y += c.vy * dt;
+          c.angle += dt * 4;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius + 14) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 4, c.secondaryColor, 110);
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.1;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius + e.radius) {
+                this.damageEnemy(j, c.damage * 0.65, c.vx * 0.18, c.vy * 0.18);
+                this.lightningArcs.push({
+                  x1: c.x,
+                  y1: c.y,
+                  x2: e.x,
+                  y2: e.y,
+                  color: c.secondaryColor,
+                  life: 0.14,
+                  maxLife: 0.14,
+                });
+              }
+            }
+          }
+          break;
+        }
+
+        case 'judgment_beam': {
+          if (c.maxLife >= 5.0) {
+            c.x = p.x;
+            c.y = p.y;
+            c.angle = p.angle;
+          }
+          c.x2 = c.x + Math.cos(c.angle) * 1500;
+          c.y2 = c.y + Math.sin(c.angle) * 1500;
+
+          for (const eb of this.enemyBullets) {
+            if (eb.active && this.distToSegment(eb.x, eb.y, c.x, c.y, c.x2, c.y2) <= c.radius) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 3, c.secondaryColor, 90);
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.09;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer > 0) continue;
+              const d = this.distToSegment(e.x, e.y, c.x, c.y, c.x2, c.y2);
+              if (d <= c.radius + e.radius) {
+                this.damageEnemy(
+                  j,
+                  c.damage * 0.55,
+                  Math.cos(c.angle) * 90,
+                  Math.sin(c.angle) * 90
+                );
+              }
+            }
+          }
+          break;
+        }
+
+        case 'traveling_blackhole': {
+          c.x += c.vx * dt;
+          c.y += c.vy * dt;
+          c.angle += dt * 5.5;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius * 1.35) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 3, c.secondaryColor, 100);
+            }
+          }
+          for (const e of this.enemies) {
+            if (e.spawnTimer > 0) continue;
+            const dx = c.x - e.x;
+            const dy = c.y - e.y;
+            const d = Math.hypot(dx, dy);
+            if (d > 8 && d <= c.radius * 2.2) {
+              const pullForce = e.isBoss ? 140 : 760;
+              e.vx += (dx / d) * pullForce * dt;
+              e.vy += (dy / d) * pullForce * dt;
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.11;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && Math.hypot(e.x - c.x, e.y - c.y) <= c.radius + e.radius) {
+                this.damageEnemy(j, c.damage * 0.65, 0, 0);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'ricochet_blade': {
+          c.x2 = c.x;
+          c.y2 = c.y;
+          c.x += c.vx * dt;
+          c.y += c.vy * dt;
+          c.angle += dt * 18;
+
+          let bounced = false;
+          if (c.x <= minX) {
+            c.x = minX;
+            c.vx = Math.abs(c.vx);
+            bounced = true;
+          } else if (c.x >= maxX) {
+            c.x = maxX;
+            c.vx = -Math.abs(c.vx);
+            bounced = true;
+          }
+          if (c.y <= minY) {
+            c.y = minY;
+            c.vy = Math.abs(c.vy);
+            bounced = true;
+          } else if (c.y >= maxY) {
+            c.y = maxY;
+            c.vy = -Math.abs(c.vy);
+            bounced = true;
+          }
+          if (bounced) {
+            c.hitIds.clear();
+            this.spawnShockwave(c.x, c.y, c.radius * 1.4, c.color, 2.2);
+            this.spawnBurst(c.x, c.y, 7, c.secondaryColor, 150);
+          }
+
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius + 10) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 3, c.color, 90);
+            }
+          }
+
+          for (let j = this.enemies.length - 1; j >= 0; j--) {
+            const e = this.enemies[j];
+            if (e.spawnTimer > 0 || c.hitIds.has(e.id)) continue;
+            if (Math.hypot(e.x - c.x, e.y - c.y) <= c.radius + e.radius) {
+              c.hitIds.add(e.id);
+              this.damageEnemy(j, c.damage * 0.85, c.vx * 0.12, c.vy * 0.12);
+            }
+          }
+          break;
+        }
+
+        case 'colossal_slash': {
+          c.x += c.vx * dt;
+          c.y += c.vy * dt;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - c.x, eb.y - c.y) <= c.radius) {
+              eb.active = false;
+              this.spawnBurst(eb.x, eb.y, 3, c.secondaryColor, 100);
+            }
+          }
+          if (c.tickTimer <= 0) {
+            c.tickTimer = 0.08;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer > 0) continue;
+              if (Math.hypot(e.x - c.x, e.y - c.y) <= c.radius + e.radius) {
+                this.damageEnemy(j, c.damage * 0.65, c.vx * 0.2, c.vy * 0.2);
+              }
+            }
+          }
+          break;
+        }
+
+        case 'enemy_telegraph_beam': {
+          // Telegraphed enemy/boss laser warning line that fires when timer reaches last 0.22s
+          if (c.life <= 0.22 && c.tickTimer <= 0) {
+            c.tickTimer = 0.12;
+            if (p.invulnTimer <= 0 && p.dashTimer <= 0) {
+              const d = this.distToSegment(p.x, p.y, c.x, c.y, c.x2, c.y2);
+              if (d <= c.radius + p.radius) {
+                this.damagePlayer(c.x, c.y, c.damage);
+              }
+            }
+          }
+          break;
+        }
       }
     }
   }
@@ -1290,30 +2203,251 @@ export class StarwardEngine {
     const ship = SHIPS[this.shipId] ?? SHIPS.vanguard;
 
     const hasHyperSpeed = this.activeBoostTimers.hyper_speed > 0;
-    const dashRechargeMult = hasHyperSpeed ? 2.0 : 1.0;
+    const dashRechargeMult =
+      (hasHyperSpeed ? 2.0 : 1.0) * (this.shipId === 'chronos' && p.overdriveTimer > 0 ? 3.0 : 1.0);
 
     p.squashX += (1 - p.squashX) * Math.min(1, dt * 16);
     p.squashY += (1 - p.squashY) * Math.min(1, dt * 16);
 
-    if (p.overdriveTimer > 0) {
-      p.overdriveTimer = Math.max(0, p.overdriveTimer - dt);
-      if (Math.random() < dt * 35) {
-        const a = Math.random() * Math.PI * 2;
-        this.spawnParticle(
-          p.x + Math.cos(a) * 16,
-          p.y + Math.sin(a) * 16,
-          Math.cos(a) * 85,
-          Math.sin(a) * 85,
-          0.26,
-          2.8,
-          '#FDE68A',
-          0.9
-        );
+    // Out-of-combat Nano HP Regeneration
+    p.outOfCombatTimer += dt;
+    if (this.mode !== 'hardcore' && p.outOfCombatTimer >= 3.5 && p.hp < p.maxHp) {
+      p.hp = Math.min(p.maxHp, p.hp + p.hpRegenRate * dt);
+      p.shields = Math.ceil(p.hp);
+    }
+
+    // Hold-[Q] Charge-Burst Energy Accumulation
+    if (p.isChargingDash) {
+      if (p.dashCooldown <= 0 && p.dashTimer <= 0) {
+        p.holdChargeTimer = Math.min(1.15, p.holdChargeTimer + dt);
+        const ratio = Math.min(1, p.holdChargeTimer / 1.05);
+        if (Math.random() < dt * (25 + ratio * 45)) {
+          const a = Math.random() * Math.PI * 2;
+          const dist = 36 + Math.random() * 28;
+          this.spawnParticle(
+            p.x + Math.cos(a) * dist,
+            p.y + Math.sin(a) * dist,
+            -Math.cos(a) * (130 + ratio * 120),
+            -Math.sin(a) * (130 + ratio * 120),
+            0.25,
+            2.4 + ratio * 2.2,
+            ratio >= 0.85 ? '#FDE047' : ship.dashColor,
+            0.92
+          );
+        }
+      } else {
+        p.isChargingDash = false;
+        p.holdChargeTimer = 0;
       }
     }
+
+    // Active 10-Second Ship-Specific 3D Overdrive Effects
+    if (p.overdriveTimer > 0) {
+      p.overdriveTimer = Math.max(0, p.overdriveTimer - dt);
+      p.overdrivePulseTimer -= dt;
+
+      if (this.shipId === 'solaris' && this.mode !== 'hardcore' && p.hp < p.maxHp) {
+        p.hp = Math.min(p.maxHp, p.hp + 12 * dt);
+        p.shields = Math.ceil(p.hp);
+      }
+
+      if (this.shipId === 'chronos') {
+        for (const eb of this.enemyBullets) {
+          if (eb.active) {
+            eb.x -= eb.vx * dt * 0.65;
+            eb.y -= eb.vy * dt * 0.65;
+          }
+        }
+        for (const e of this.enemies) {
+          if (e.spawnTimer <= 0) {
+            e.x -= e.vx * dt * 0.65;
+            e.y -= e.vy * dt * 0.65;
+          }
+        }
+      }
+
+      if (p.overdrivePulseTimer <= 0) {
+        if (this.shipId === 'vanguard') {
+          p.overdrivePulseTimer = 0.22;
+          for (let s = 0; s < 3; s++) {
+            const orbitA = this.elapsedTime * 5 + (s * Math.PI * 2) / 3;
+            const sx = p.x + Math.cos(orbitA) * 42;
+            const sy = p.y + Math.sin(orbitA) * 42;
+            this.spawnPlayerProjectile(sx, sy, p.angle, 880, 1.35 * p.damageMult, 1, true, ship.accentColor, 4.8);
+          }
+        } else if (this.shipId === 'phantom') {
+          p.overdrivePulseTimer = 0.24;
+          for (let s = 0; s < 4; s++) {
+            const a = this.elapsedTime * 6 + (s * Math.PI) / 2;
+            this.spawnPlayerProjectile(p.x, p.y, a, 940, 1.3 * p.damageMult, 3, false, ship.accentColor, 4.5);
+          }
+        } else if (this.shipId === 'valkyrie') {
+          p.overdrivePulseTimer = 0.26;
+          for (let s = -1; s <= 1; s++) {
+            this.spawnPlayerProjectile(
+              p.x,
+              p.y,
+              p.angle + s * 0.22,
+              860,
+              1.65 * p.damageMult,
+              4,
+              false,
+              ship.accentColor,
+              6.5
+            );
+          }
+        } else if (this.shipId === 'titan') {
+          p.overdrivePulseTimer = 0.65;
+          this.spawnShockwave(p.x, p.y, 210, ship.accentColor, 3.8);
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - p.x, eb.y - p.y) <= 190) {
+              eb.active = false;
+            }
+          }
+          for (let j = this.enemies.length - 1; j >= 0; j--) {
+            const e = this.enemies[j];
+            if (e.spawnTimer <= 0 && Math.hypot(e.x - p.x, e.y - p.y) <= 210 + e.radius) {
+              this.damageEnemy(j, 2.2 * p.damageMult, 0, 0);
+            }
+          }
+        } else if (this.shipId === 'tempest') {
+          p.overdrivePulseTimer = 0.25;
+          let hits = 0;
+          for (let j = this.enemies.length - 1; j >= 0 && hits < 5; j--) {
+            const e = this.enemies[j];
+            if (e.spawnTimer <= 0 && Math.hypot(e.x - p.x, e.y - p.y) <= 320) {
+              hits++;
+              this.lightningArcs.push({
+                x1: p.x,
+                y1: p.y,
+                x2: e.x,
+                y2: e.y,
+                color: ship.accentColor,
+                life: 0.2,
+                maxLife: 0.2,
+              });
+              this.damageEnemy(j, 1.55 * p.damageMult, 0, 0);
+            }
+          }
+        } else if (this.shipId === 'eclipse') {
+          p.overdrivePulseTimer = 0.28;
+          for (const eb of this.enemyBullets) {
+            if (eb.active && Math.hypot(eb.x - p.x, eb.y - p.y) <= 185) {
+              eb.active = false;
+              this.spawnPlayerProjectile(eb.x, eb.y, p.angle, 950, 1.5 * p.damageMult, 3, true, ship.accentColor, 5);
+            }
+          }
+          for (const e of this.enemies) {
+            if (e.spawnTimer <= 0 && !e.isBoss) {
+              const d = Math.hypot(p.x - e.x, p.y - e.y);
+              if (d > 40 && d < 280) {
+                e.vx += ((p.x - e.x) / d) * 120;
+                e.vy += ((p.y - e.y) / d) * 120;
+              }
+            }
+          }
+        } else if (this.shipId === 'nova') {
+          p.overdrivePulseTimer = 0.24;
+          for (let s = 0; s < 4; s++) {
+            const a = (s * Math.PI) / 2 + this.elapsedTime * 3;
+            this.spawnPlayerProjectile(p.x, p.y, a, 620, 1.35 * p.damageMult, 1, true, ship.accentColor, 5.2);
+          }
+        } else if (this.shipId === 'solaris') {
+          p.overdrivePulseTimer = 0.32;
+          this.spawnShockwave(p.x, p.y, 175, ship.accentColor, 3);
+          for (let j = this.enemies.length - 1; j >= 0; j--) {
+            const e = this.enemies[j];
+            if (e.spawnTimer <= 0 && Math.hypot(e.x - p.x, e.y - p.y) <= 175 + e.radius) {
+              this.damageEnemy(j, 1.75 * p.damageMult, 0, 0);
+            }
+          }
+        } else if (this.shipId === 'aether') {
+          p.overdrivePulseTimer = 0.22;
+          for (let b = 0; b < 4; b++) {
+            const a = this.elapsedTime * 2.6 + (b * Math.PI) / 2;
+            const bx2 = p.x + Math.cos(a) * 900;
+            const by2 = p.y + Math.sin(a) * 900;
+            for (let j = this.enemies.length - 1; j >= 0; j--) {
+              const e = this.enemies[j];
+              if (e.spawnTimer <= 0 && this.distToSegment(e.x, e.y, p.x, p.y, bx2, by2) <= e.radius + 18) {
+                this.damageEnemy(j, 1.45 * p.damageMult, 0, 0);
+              }
+            }
+          }
+        } else if (this.shipId === 'chronos') {
+          p.overdrivePulseTimer = 0.28;
+          p.dashCooldown = 0;
+          this.spawnPlayerProjectile(p.x, p.y, p.angle, 920, 1.6 * p.damageMult, 3, true, ship.accentColor, 5.2);
+        } else if (this.shipId === 'omega') {
+          p.overdrivePulseTimer = 1.45;
+          this.fieldConstructs.push({
+            kind: 'colossal_orb',
+            x: p.x + Math.cos(p.angle) * 28,
+            y: p.y + Math.sin(p.angle) * 28,
+            x2: 0,
+            y2: 0,
+            vx: Math.cos(p.angle) * 310,
+            vy: Math.sin(p.angle) * 310,
+            angle: p.angle,
+            radius: 135,
+            life: 4.0,
+            maxLife: 4.0,
+            tickTimer: 0,
+            damage: 2.8 * p.damageMult,
+            color: ship.dashColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
+        } else if (this.shipId === 'leviathan') {
+          p.overdrivePulseTimer = 2.1;
+          this.fieldConstructs.push({
+            kind: 'traveling_blackhole',
+            x: p.x + Math.cos(p.angle) * 30,
+            y: p.y + Math.sin(p.angle) * 30,
+            x2: 0,
+            y2: 0,
+            vx: Math.cos(p.angle) * 180,
+            vy: Math.sin(p.angle) * 180,
+            angle: p.angle,
+            radius: 145,
+            life: 4.5,
+            maxLife: 4.5,
+            tickTimer: 0,
+            damage: 2.6 * p.damageMult,
+            color: ship.dashColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
+        } else if (this.shipId === 'apocalypse') {
+          p.overdrivePulseTimer = 0.55;
+          this.fieldConstructs.push({
+            kind: 'colossal_slash',
+            x: p.x + Math.cos(p.angle) * 30,
+            y: p.y + Math.sin(p.angle) * 30,
+            x2: 0,
+            y2: 0,
+            vx: Math.cos(p.angle) * 640,
+            vy: Math.sin(p.angle) * 640,
+            angle: p.angle,
+            radius: 235,
+            life: 2.2,
+            maxLife: 2.2,
+            tickTimer: 0,
+            damage: 3.5 * p.damageMult,
+            color: ship.accentColor,
+            secondaryColor: ship.dashSecondaryColor,
+            hitIds: new Set<number>(),
+          });
+        }
+      }
+    }
+
     if (p.invulnTimer > 0) p.invulnTimer = Math.max(0, p.invulnTimer - dt);
     if (p.hitFlash > 0) p.hitFlash = Math.max(0, p.hitFlash - dt);
     if (p.fireCooldown > 0) p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+    if (p.ricochetBossCooldown > 0) {
+      p.ricochetBossCooldown = Math.max(0, p.ricochetBossCooldown - dt);
+    }
     if (p.dashCooldown > 0) {
       p.dashCooldown = Math.max(0, p.dashCooldown - dt * dashRechargeMult);
     }
@@ -1346,14 +2480,139 @@ export class StarwardEngine {
       p.angle = Math.atan2(iy, ix);
     }
 
+    const minX = this.arenaPad + p.radius;
+    const maxX = this.width - this.arenaPad - p.radius;
+    const minY = this.arenaPad + p.radius;
+    const maxY = this.height - this.arenaPad - p.radius;
+
+    // SPECIAL HYPERION [E] OVERDRIVE: Pinball Wall-Ricochet Lightning Mode!
+    // Continuously bounces off the 4 walls at supersonic speed, instantly obliterating all non-boss enemies!
+    if (this.shipId === 'hyperion' && p.overdriveTimer > 0) {
+      p.invulnTimer = Math.max(p.invulnTimer, 0.25);
+
+      // Gentle player steering nudge while bouncing
+      if (inputLen > 0.1) {
+        p.ricochetVx += ix * 650 * dt;
+        p.ricochetVy += iy * 650 * dt;
+      }
+      const curSpd = Math.max(1, Math.hypot(p.ricochetVx, p.ricochetVy));
+      const targetSpd = 1680;
+      p.ricochetVx = (p.ricochetVx / curSpd) * targetSpd;
+      p.ricochetVy = (p.ricochetVy / curSpd) * targetSpd;
+
+      p.vx = p.ricochetVx;
+      p.vy = p.ricochetVy;
+      p.angle = Math.atan2(p.ricochetVy, p.ricochetVx);
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+
+      this.dashGhosts.push({
+        x: p.x,
+        y: p.y,
+        angle: p.angle,
+        alpha: 0.85,
+        shipId: this.shipId,
+        color: ship.accentColor,
+        secondaryColor: ship.dashSecondaryColor,
+        scale: 1.05,
+      });
+
+      let wallBounced = false;
+      if (p.x <= minX) {
+        p.x = minX;
+        p.ricochetVx = Math.abs(p.ricochetVx);
+        wallBounced = true;
+      } else if (p.x >= maxX) {
+        p.x = maxX;
+        p.ricochetVx = -Math.abs(p.ricochetVx);
+        wallBounced = true;
+      }
+      if (p.y <= minY) {
+        p.y = minY;
+        p.ricochetVy = Math.abs(p.ricochetVy);
+        wallBounced = true;
+      } else if (p.y >= maxY) {
+        p.y = maxY;
+        p.ricochetVy = -Math.abs(p.ricochetVy);
+        wallBounced = true;
+      }
+
+      if (wallBounced) {
+        // Draw a laser rebound beam between the previous wall bounce and this bounce
+        this.lightningArcs.push({
+          x1: p.ricochetLastBounceX,
+          y1: p.ricochetLastBounceY,
+          x2: p.x,
+          y2: p.y,
+          color: '#00F5D4',
+          life: 0.42,
+          maxLife: 0.42,
+        });
+        p.ricochetLastBounceX = p.x;
+        p.ricochetLastBounceY = p.y;
+
+        // Smartly bias bounce angle toward a random live enemy so it sweeps the entire screen!
+        const liveTargets = this.enemies.filter((e) => e.spawnTimer <= 0);
+        if (liveTargets.length > 0) {
+          const target = liveTargets[Math.floor(Math.random() * liveTargets.length)];
+          const toTargetA = Math.atan2(target.y - p.y, target.x - p.x);
+          const bounceA = Math.atan2(p.ricochetVy, p.ricochetVx);
+          const blendedA = this.lerpAngle(bounceA, toTargetA, 0.58);
+          p.ricochetVx = Math.cos(blendedA) * targetSpd;
+          p.ricochetVy = Math.sin(blendedA) * targetSpd;
+        }
+
+        this.addShake(6.5);
+        this.sound.playDash();
+        this.spawnShockwave(p.x, p.y, 165, '#00F5D4', 3.6);
+        this.spawnBurst(p.x, p.y, 18, '#FDE047', 240);
+      }
+
+      // Destroy any enemy bullets near Hyperion's ricochet path
+      for (const eb of this.enemyBullets) {
+        if (eb.active && Math.hypot(eb.x - p.x, eb.y - p.y) <= 95) {
+          eb.active = false;
+          this.spawnBurst(eb.x, eb.y, 3, '#00F5D4', 90);
+        }
+      }
+
+      // Sweep and OBLITERATE all non-boss enemies in path (Bosses take normal impact damage, never instant-killed!)
+      for (let j = this.enemies.length - 1; j >= 0; j--) {
+        const e = this.enemies[j];
+        if (e.spawnTimer > 0) continue;
+        const d = Math.hypot(e.x - p.x, e.y - p.y);
+        if (d <= e.radius + p.radius + 54) {
+          if (!e.isBoss) {
+            this.spawnFloatingText(e.x, e.y - 18, 'QUÉT SẠCH!', '#00F5D4');
+            this.damageEnemy(j, e.hp + 9999, p.ricochetVx * 0.25, p.ricochetVy * 0.25);
+          } else if (p.ricochetBossCooldown <= 0) {
+            p.ricochetBossCooldown = 0.22;
+            this.damageEnemy(j, 3.2 * p.damageMult, p.ricochetVx * 0.05, p.ricochetVy * 0.05);
+          }
+        }
+      }
+      return;
+    }
+
+    // Standard Dash Trigger (on tap or after releasing Hold-[Q] Charge)
     if (this.dashBufferTimer > 0 && p.dashCooldown <= 0 && p.dashTimer <= 0) {
+      const chargeRatio = this.pendingChargeRatio;
+      this.pendingChargeRatio = 0;
       this.dashBufferTimer = 0;
-      p.dashTimer = 0.18;
+      p.dashTimer = 0.19;
       p.dashTickTimer = 0;
       p.dashCooldown = p.dashMaxCooldown;
-      p.invulnTimer = Math.max(p.invulnTimer, 0.28);
+      p.invulnTimer = Math.max(p.invulnTimer, 0.32 + chargeRatio * 0.25);
+      p.dashStartX = p.x;
+      p.dashStartY = p.y;
 
-      if (inputLen > 0.1) {
+      // Respect player's configured Dash Direction Mode ('mouse' vs 'movement')
+      const dirMode = this.profile.dashDirectionMode ?? 'mouse';
+      if (dirMode === 'mouse' && this.hasPointerAim) {
+        const aimAngle = Math.atan2(this.mouseY - p.y, this.mouseX - p.x);
+        p.dashDirX = Math.cos(aimAngle);
+        p.dashDirY = Math.sin(aimAngle);
+      } else if (inputLen > 0.1) {
         p.dashDirX = ix;
         p.dashDirY = iy;
       } else {
@@ -1361,15 +2620,15 @@ export class StarwardEngine {
         p.dashDirY = Math.sin(p.angle);
       }
 
-      const speedBoost = hasHyperSpeed ? 1.35 : 1.0;
-      p.vx = p.dashDirX * 920 * p.speedMult * speedBoost;
-      p.vy = p.dashDirY * 920 * p.speedMult * speedBoost;
+      const speedBoost = (hasHyperSpeed ? 1.35 : 1.0) * (1 + chargeRatio * 0.35);
+      p.vx = p.dashDirX * 940 * p.speedMult * speedBoost;
+      p.vy = p.dashDirY * 940 * p.speedMult * speedBoost;
       p.squashX = 1.48;
       p.squashY = 0.64;
-      this.addShake(4.5);
+      this.addShake(4.5 + chargeRatio * 5);
       this.sound.playDash();
 
-      this.executeShipDashEffect();
+      this.executeShipDashEffect(chargeRatio);
     }
 
     if (p.dashTimer > 0) {
@@ -1387,7 +2646,6 @@ export class StarwardEngine {
         scale: 1.0,
       });
 
-      // Spawn continuous ship-specific dash trail particles
       for (let k = 0; k < 2; k++) {
         const spreadA = p.angle + Math.PI + (Math.random() - 0.5) * 0.9;
         const spd = 80 + Math.random() * 140;
@@ -1400,22 +2658,6 @@ export class StarwardEngine {
           3.4,
           k === 0 ? ship.dashColor : ship.dashSecondaryColor,
           0.9
-        );
-      }
-
-      // Solaris leaves fire orbs along its dash trajectory
-      if (ship.dashStyle === 'golden_phoenix' && p.dashTickTimer <= 0) {
-        p.dashTickTimer = 0.045;
-        this.spawnPlayerProjectile(
-          p.x,
-          p.y,
-          p.angle + Math.PI + (Math.random() - 0.5) * 0.4,
-          120,
-          1.4 * p.damageMult,
-          2,
-          false,
-          ship.dashColor,
-          6.5
         );
       }
 
@@ -1432,9 +2674,10 @@ export class StarwardEngine {
         }
       }
     } else {
-      const overdriveBoost = p.overdriveTimer > 0 ? 1.22 : 1.0;
+      const overdriveBoost = p.overdriveTimer > 0 ? 1.24 : 1.0;
       const speedPickupBoost = hasHyperSpeed ? 1.55 : 1.0;
-      const totalSpeedMult = p.speedMult * overdriveBoost * speedPickupBoost;
+      const chargeSlowMult = p.isChargingDash ? 0.68 : 1.0;
+      const totalSpeedMult = p.speedMult * overdriveBoost * speedPickupBoost * chargeSlowMult;
 
       const accel = 1950 * totalSpeedMult;
       const maxSpeed = 350 * totalSpeedMult;
@@ -1477,11 +2720,6 @@ export class StarwardEngine {
 
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-
-    const minX = this.arenaPad + p.radius;
-    const maxX = this.width - this.arenaPad - p.radius;
-    const minY = this.arenaPad + p.radius;
-    const maxY = this.height - this.arenaPad - p.radius;
 
     if (p.x < minX) {
       p.x = minX;
@@ -1655,17 +2893,29 @@ export class StarwardEngine {
   private updateWaveSpawning(dt: number): void {
     if (this.waveSpawnQueue.length > 0) {
       this.spawnCooldown -= dt;
-      const maxConcurrent = Math.min(6 + this.wave * 2, 18);
+      // Reduced concurrent cap so the battlefield remains tactical and never cluttered
+      const maxConcurrent = Math.min(4 + Math.floor(this.wave * 0.65), 9);
       if (this.spawnCooldown <= 0 && this.enemies.length < maxConcurrent) {
         const nextEntry = this.waveSpawnQueue.shift()!;
         this.spawnEnemyAtSafeEdge(nextEntry.type, nextEntry.isElite);
-        const interval = Math.max(0.38, 1.15 - this.wave * 0.065);
+        const interval = Math.max(0.55, 1.35 - this.wave * 0.055);
         this.spawnCooldown = interval;
       }
     } else if (this.enemies.length === 0) {
       if (this.waveClearDelay <= 0) {
         this.waveClearDelay = 1.05;
         this.sound.playWaveClear();
+        if (this.mode !== 'hardcore' && this.player.hp < this.player.maxHp) {
+          const heal = Math.round(this.player.maxHp * 0.15);
+          this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+          this.player.shields = Math.ceil(this.player.hp);
+          this.spawnFloatingText(
+            this.player.x,
+            this.player.y - 28,
+            `QUA ĐỢT +${heal} HP`,
+            COLORS.repair
+          );
+        }
         this.waveBanner = `HOÀN THÀNH ĐỢT ${String(this.wave).padStart(2, '0')}`;
         this.waveBannerTimer = 1.0;
       } else {
@@ -1678,7 +2928,12 @@ export class StarwardEngine {
   }
 
   private spawnEnemyAtSafeEdge(type: EnemyType, isElite: boolean): void {
-    if (type === 'boss_aegis' || type === 'boss_hydra') {
+    if (
+      type === 'boss_aegis' ||
+      type === 'boss_hydra' ||
+      type === 'boss_valkyria' ||
+      type === 'boss_chronovore'
+    ) {
       const bx = this.width * 0.5;
       const by = Math.max(this.arenaPad + 95, this.height * 0.22);
       this.createEnemy(type, bx, by, 1.1, false);
@@ -1704,7 +2959,7 @@ export class StarwardEngine {
         x = this.width - pad - Math.random() * 36;
         y = pad + Math.random() * Math.max(40, this.height - pad * 2);
       }
-      if (Math.hypot(x - this.player.x, y - this.player.y) > 220) break;
+      if (Math.hypot(x - this.player.x, y - this.player.y) > 240) break;
     }
 
     this.createEnemy(type, x, y, 0.55, isElite);
@@ -1717,69 +2972,101 @@ export class StarwardEngine {
     spawnTimer: number,
     isElite: boolean
   ): Enemy {
-    const modeSpeed = this.mode === 'hardcore' ? 1.22 : 1.0;
-    const speedScale = (1 + Math.min((this.wave - 1) * 0.055, 0.5)) * modeSpeed;
-    const hpScale = 1 + Math.max(0, this.wave - 1) * 0.14;
+    const modeSpeed = this.mode === 'hardcore' ? 1.2 : 1.0;
+    const speedScale = (1 + Math.min((this.wave - 1) * 0.045, 0.45)) * modeSpeed;
+    const hpScale = 1 + Math.max(0, this.wave - 1) * 0.16;
 
     let radius = 14;
-    let hp = 1.2 * hpScale;
-    let speed = 135 * speedScale;
-    let points = 100;
+    let hp = 1.3 * hpScale;
+    let speed = 132 * speedScale;
+    let points = 110;
     let isBoss = false;
 
     if (type === 'chaser') {
       radius = 12;
-      hp = 1.0 * hpScale;
-      speed = 215 * speedScale;
-      points = 130;
+      hp = 1.1 * hpScale;
+      speed = 205 * speedScale;
+      points = 140;
     } else if (type === 'shooter') {
       radius = 15;
-      hp = 2.0 * hpScale;
-      speed = 112 * speedScale;
-      points = 190;
+      hp = 2.1 * hpScale;
+      speed = 110 * speedScale;
+      points = 200;
+    } else if (type === 'sniper') {
+      radius = 16;
+      hp = 2.2 * hpScale;
+      speed = 98 * speedScale;
+      points = 240;
+    } else if (type === 'bomber') {
+      radius = 18;
+      hp = 3.0 * hpScale;
+      speed = 95 * speedScale;
+      points = 260;
+    } else if (type === 'vortex') {
+      radius = 19;
+      hp = 3.5 * hpScale;
+      speed = 90 * speedScale;
+      points = 290;
     } else if (type === 'tank') {
       radius = 25;
       hp = 6.5 * hpScale;
       speed = 68 * speedScale;
-      points = 340;
+      points = 360;
+    } else if (type === 'juggernaut') {
+      radius = 29;
+      hp = 8.5 * hpScale;
+      speed = 64 * speedScale;
+      points = 460;
     } else if (type === 'charger') {
       radius = 15;
       hp = 2.2 * hpScale;
       speed = 118 * speedScale;
-      points = 200;
+      points = 210;
     } else if (type === 'prism') {
       radius = 22;
       hp = 3.4 * hpScale;
       speed = 84 * speedScale;
-      points = 260;
+      points = 270;
     } else if (type === 'pulsar') {
       radius = 17;
       hp = 2.5 * hpScale;
-      speed = 105 * speedScale;
-      points = 230;
+      speed = 102 * speedScale;
+      points = 240;
     } else if (type === 'shardling') {
       radius = 9;
       hp = 0.9 * hpScale;
-      speed = 205 * speedScale;
-      points = 80;
+      speed = 195 * speedScale;
+      points = 85;
     } else if (type === 'boss_aegis') {
-      radius = 42;
-      hp = 58 + this.wave * 18;
-      speed = 78 * modeSpeed;
-      points = 2200;
+      radius = 44;
+      hp = 68 + this.wave * 22;
+      speed = 76 * modeSpeed;
+      points = 2500;
       isBoss = true;
     } else if (type === 'boss_hydra') {
-      radius = 44;
-      hp = 68 + this.wave * 20;
-      speed = 86 * modeSpeed;
-      points = 2600;
+      radius = 46;
+      hp = 78 + this.wave * 24;
+      speed = 84 * modeSpeed;
+      points = 2900;
+      isBoss = true;
+    } else if (type === 'boss_valkyria') {
+      radius = 45;
+      hp = 85 + this.wave * 26;
+      speed = 96 * modeSpeed;
+      points = 3400;
+      isBoss = true;
+    } else if (type === 'boss_chronovore') {
+      radius = 48;
+      hp = 96 + this.wave * 28;
+      speed = 80 * modeSpeed;
+      points = 3800;
       isBoss = true;
     }
 
     if (isElite && !isBoss) {
       radius = Math.round(radius * 1.24);
-      hp *= 2.4;
-      speed *= 1.1;
+      hp *= 2.3;
+      speed *= 1.08;
       points *= 2.5;
     }
 
@@ -1803,14 +3090,21 @@ export class StarwardEngine {
       isBoss,
       bossPhase: 1,
       state:
-        type === 'pulsar' || type === 'shooter' || isBoss ? 'orbit' : 'chase',
+        type === 'pulsar' ||
+        type === 'shooter' ||
+        type === 'sniper' ||
+        type === 'bomber' ||
+        type === 'vortex' ||
+        isBoss
+          ? 'orbit'
+          : 'chase',
       stateTimer:
-        type === 'shooter'
-          ? 1.1 + Math.random() * 0.7
+        type === 'shooter' || type === 'sniper'
+          ? 2.2 + Math.random() * 1.1
           : isBoss
-          ? 2.0
-          : 1.3 + Math.random() * 0.7,
-      secondaryTimer: 2.2,
+          ? 2.2
+          : 2.0 + Math.random() * 1.0,
+      secondaryTimer: 2.6,
       aimX: this.player.x,
       aimY: this.player.y,
       orbitDir: Math.random() < 0.5 ? 1 : -1,
@@ -1831,7 +3125,7 @@ export class StarwardEngine {
 
       if (b.homing && this.enemies.length > 0) {
         let nearest: Enemy | null = null;
-        let bestDist = 380;
+        let bestDist = 420;
         for (const e of this.enemies) {
           if (e.spawnTimer > 0 || b.hitEnemyIds.has(e.id)) continue;
           const d = Math.hypot(e.x - b.x, e.y - b.y);
@@ -1859,13 +3153,29 @@ export class StarwardEngine {
         continue;
       }
 
+      // Allow player bullets to shoot down destructible enemy plasma orbs & mines!
+      for (const eb of this.enemyBullets) {
+        if (eb.active && eb.destructible) {
+          if (Math.hypot(b.x - eb.x, b.y - eb.y) <= b.radius + eb.radius + 3) {
+            eb.active = false;
+            this.spawnBurst(eb.x, eb.y, 6, eb.color, 110);
+            if (b.pierce <= 0) {
+              b.active = false;
+              break;
+            }
+          }
+        }
+      }
+      if (!b.active) continue;
+
       for (let i = this.enemies.length - 1; i >= 0; i--) {
         const e = this.enemies[i];
         if (e.spawnTimer > 0 || b.hitEnemyIds.has(e.id)) continue;
         const dist = Math.hypot(b.x - e.x, b.y - e.y);
         if (dist <= b.radius + e.radius) {
           b.hitEnemyIds.add(e.id);
-          const knockScale = e.type === 'tank' ? 0.025 : e.isBoss ? 0.008 : 0.08;
+          const knockScale =
+            e.type === 'tank' || e.type === 'juggernaut' ? 0.025 : e.isBoss ? 0.008 : 0.08;
           this.damageEnemy(i, b.damage, b.vx * knockScale, b.vy * knockScale);
 
           if (b.pierce > 0) {
@@ -1940,10 +3250,6 @@ export class StarwardEngine {
 
         if (bp.type === 'hyper_speed') {
           p.dashCooldown = 0;
-        } else if (bp.type === 'hyper_magnet') {
-          if (p.overdriveTimer <= 0) {
-            p.overdriveCharge = Math.min(100, p.overdriveCharge + 18);
-          }
         }
         this.pushHud(true);
       }
@@ -1960,11 +3266,21 @@ export class StarwardEngine {
     e.vx += knockVx;
     e.vy += knockVy;
 
+    // Overdrive ONLY charges from dealing damage, accumulating at a steady tactical pace
     if (this.player.overdriveTimer <= 0) {
-      this.player.overdriveCharge = Math.min(
-        100,
-        this.player.overdriveCharge + 1.4 * this.player.overdriveGainMult
-      );
+      const hitGain = (0.36 + Math.min(1.3, damage * 0.35)) * this.player.overdriveGainMult;
+      this.player.overdriveCharge = Math.min(100, this.player.overdriveCharge + hitGain);
+    }
+
+    // Valkyrie Overdrive lifesteal on hit
+    if (
+      this.shipId === 'valkyrie' &&
+      this.player.overdriveTimer > 0 &&
+      this.mode !== 'hardcore' &&
+      this.player.hp < this.player.maxHp
+    ) {
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1.5);
+      this.player.shields = Math.ceil(this.player.hp);
     }
 
     if (e.isBoss && e.bossPhase === 1 && e.hp <= e.maxHp * 0.5) {
@@ -1972,12 +3288,13 @@ export class StarwardEngine {
       this.spawnShockwave(e.x, e.y, 160, '#F43F5E', 3.5);
       this.spawnFloatingText(e.x, e.y - e.radius - 12, 'CUỒNG NỘ PHA 2!', '#FB7185');
       this.addShake(7);
-      // Boss drops a guaranteed combat boost when entering Phase 2
       this.spawnRandomBoostPickup(e.x, e.y);
     }
 
     if (e.hp > 0) {
-      this.sound.playHit(e.type === 'prism' || e.type === 'tank' || e.isBoss);
+      this.sound.playHit(
+        e.type === 'prism' || e.type === 'tank' || e.type === 'juggernaut' || e.isBoss
+      );
       this.spawnBurst(e.x, e.y, 5, '#F8FAFC', 130);
       return;
     }
@@ -1996,10 +3313,6 @@ export class StarwardEngine {
       if (this.elitesDefeated >= 5) {
         this.tryUnlockAchievement('elite_hunter');
       }
-      for (let k = 0; k < 6; k++) {
-        const a = (k * Math.PI * 2) / 6;
-        this.spawnEnemyProjectile(e.x, e.y, Math.cos(a) * 185, Math.sin(a) * 185, 4.8, '#FBBF24');
-      }
     }
 
     if (e.isBoss) {
@@ -2009,10 +3322,10 @@ export class StarwardEngine {
     }
 
     if (this.player.overdriveTimer <= 0) {
-      const gain = e.isBoss ? 35 : e.isElite ? 12 : 4.5;
+      const killGain = e.isBoss ? 22 : e.isElite ? 6.5 : 2.2;
       this.player.overdriveCharge = Math.min(
         100,
-        this.player.overdriveCharge + gain * this.player.overdriveGainMult
+        this.player.overdriveCharge + killGain * this.player.overdriveGainMult
       );
     }
 
@@ -2027,7 +3340,12 @@ export class StarwardEngine {
     );
 
     const isHeavy =
-      e.isBoss || e.isElite || e.type === 'prism' || e.type === 'tank' || e.type === 'charger';
+      e.isBoss ||
+      e.isElite ||
+      e.type === 'prism' ||
+      e.type === 'tank' ||
+      e.type === 'juggernaut' ||
+      e.type === 'charger';
     this.sound.playExplosion(isHeavy);
 
     if (e.isBoss) {
@@ -2070,7 +3388,7 @@ export class StarwardEngine {
       ? 14
       : e.isElite
       ? 5
-      : e.type === 'tank'
+      : e.type === 'tank' || e.type === 'juggernaut'
       ? 4
       : e.type === 'prism'
       ? 3
@@ -2082,12 +3400,11 @@ export class StarwardEngine {
       this.spawnShard(e.x, e.y, 25, e.isBoss ? 3 : e.isElite ? 2 : 1, false);
     }
 
-    // Roll for temporary combat boost drop (Tốc Bắn, Tốc Chạy, Sát Thương, Từ Trường)
     const boostDropChance = e.isBoss
       ? 1.0
       : e.isElite
       ? 0.48
-      : e.type === 'tank' || e.type === 'prism'
+      : e.type === 'tank' || e.type === 'juggernaut' || e.type === 'prism'
       ? 0.24
       : 0.14;
     if (Math.random() < boostDropChance) {
@@ -2096,8 +3413,8 @@ export class StarwardEngine {
 
     if (
       this.mode !== 'hardcore' &&
-      this.player.shields < this.player.maxShields &&
-      (e.isBoss || Math.random() < (e.isElite ? 0.25 : 0.07))
+      this.player.hp < this.player.maxHp &&
+      (e.isBoss || Math.random() < (e.isElite ? 0.32 : 0.11))
     ) {
       this.spawnShard(e.x, e.y, 50, 2, true);
     }
@@ -2111,8 +3428,16 @@ export class StarwardEngine {
         return COLORS.chaser;
       case 'shooter':
         return COLORS.shooter;
+      case 'sniper':
+        return COLORS.sniper;
+      case 'bomber':
+        return COLORS.bomber;
+      case 'vortex':
+        return COLORS.vortex;
       case 'tank':
         return COLORS.tank;
+      case 'juggernaut':
+        return COLORS.juggernaut;
       case 'charger':
         return COLORS.charger;
       case 'prism':
@@ -2125,6 +3450,10 @@ export class StarwardEngine {
         return COLORS.bossAegis;
       case 'boss_hydra':
         return COLORS.bossHydra;
+      case 'boss_valkyria':
+        return COLORS.bossValkyria;
+      case 'boss_chronovore':
+        return COLORS.bossChronovore;
       default:
         return COLORS.drifter;
     }
@@ -2167,23 +3496,132 @@ export class StarwardEngine {
         const desiredVy = Math.sin(e.angle) * e.speed;
         e.vx += (desiredVx - e.vx) * Math.min(1, dt * 7.5);
         e.vy += (desiredVy - e.vy) * Math.min(1, dt * 7.5);
-      } else if (e.type === 'tank') {
+      } else if (e.type === 'tank' || e.type === 'juggernaut') {
         const targetAngle = Math.atan2(dy, dx);
-        e.angle = this.lerpAngle(e.angle, targetAngle, dt * 2.4);
+        e.angle = this.lerpAngle(e.angle, targetAngle, dt * 2.2);
         e.vx += (Math.cos(e.angle) * e.speed - e.vx) * Math.min(1, dt * 3);
         e.vy += (Math.sin(e.angle) * e.speed - e.vy) * Math.min(1, dt * 3);
         e.stateTimer -= dt;
         if (e.stateTimer <= 0) {
-          e.stateTimer = 3.2;
-          for (let k = 0; k < 6; k++) {
-            const a = e.angle + (k * Math.PI * 2) / 6;
-            this.spawnEnemyProjectile(e.x, e.y, Math.cos(a) * 155, Math.sin(a) * 155, 5.5, COLORS.tank);
+          e.stateTimer = 4.2;
+          if (e.type === 'juggernaut') {
+            // Fires 2 wide readable Crescent Plasma Waves toward player
+            for (let s = -1; s <= 1; s += 2) {
+              const a = e.angle + s * 0.16;
+              this.spawnEnemyProjectile(
+                e.x + Math.cos(a) * e.radius,
+                e.y + Math.sin(a) * e.radius,
+                Math.cos(a) * 215,
+                Math.sin(a) * 215,
+                11,
+                COLORS.juggernaut,
+                34,
+                'crescent',
+                false
+              );
+            }
+          } else {
+            // Fires 4 cardinal Energy Lances
+            for (let k = 0; k < 4; k++) {
+              const a = e.angle + (k * Math.PI) / 2;
+              this.spawnEnemyProjectile(
+                e.x,
+                e.y,
+                Math.cos(a) * 165,
+                Math.sin(a) * 165,
+                6,
+                COLORS.tank,
+                26,
+                'lance',
+                false
+              );
+            }
           }
-          this.spawnShockwave(e.x, e.y, e.radius * 2.2, COLORS.tank, 2);
+          this.spawnShockwave(e.x, e.y, e.radius * 2.2, this.getEnemyColor(e), 2);
+        }
+      } else if (e.type === 'sniper') {
+        const desiredDist = 340;
+        const radialPush = Math.max(-1, Math.min(1, (distToPlayer - desiredDist) / 90));
+        const tangentX = -dirY * e.orbitDir;
+        const tangentY = dirX * e.orbitDir;
+        e.vx += ((dirX * radialPush * 0.7 + tangentX * 0.6) * e.speed - e.vx) * Math.min(1, dt * 4);
+        e.vy += ((dirY * radialPush * 0.7 + tangentY * 0.6) * e.speed - e.vy) * Math.min(1, dt * 4);
+        e.angle = Math.atan2(dy, dx);
+        e.stateTimer -= dt;
+        if (e.stateTimer <= 0) {
+          e.stateTimer = 4.0 + Math.random() * 1.0;
+          // Spawns a telegraphed laser beam line that gives the player 0.85s to sidestep before firing!
+          this.fieldConstructs.push({
+            kind: 'enemy_telegraph_beam',
+            x: e.x,
+            y: e.y,
+            x2: e.x + dirX * 1100,
+            y2: e.y + dirY * 1100,
+            vx: 0,
+            vy: 0,
+            angle: e.angle,
+            radius: 14,
+            life: 1.05,
+            maxLife: 1.05,
+            tickTimer: 0,
+            damage: 32,
+            color: COLORS.sniper,
+            secondaryColor: '#FFE4E6',
+            hitIds: new Set<number>(),
+          });
+          this.sound.playTelegraph();
+        }
+      } else if (e.type === 'bomber') {
+        const desiredDist = 240;
+        const radialPush = Math.max(-1, Math.min(1, (distToPlayer - desiredDist) / 90));
+        const tangentX = -dirY * e.orbitDir;
+        const tangentY = dirX * e.orbitDir;
+        e.vx += ((dirX * radialPush * 0.6 + tangentX * 0.85) * e.speed - e.vx) * Math.min(1, dt * 4);
+        e.vy += ((dirY * radialPush * 0.6 + tangentY * 0.85) * e.speed - e.vy) * Math.min(1, dt * 4);
+        e.angle = Math.atan2(dy, dx);
+        e.stateTimer -= dt;
+        if (e.stateTimer <= 0) {
+          e.stateTimer = 3.8 + Math.random() * 0.8;
+          // Drops a destructible floating Space Mine
+          this.spawnEnemyProjectile(
+            e.x,
+            e.y,
+            dirX * 45,
+            dirY * 45,
+            10,
+            COLORS.bomber,
+            34,
+            'mine',
+            true
+          );
+        }
+      } else if (e.type === 'vortex') {
+        const desiredDist = 260;
+        const radialPush = Math.max(-1, Math.min(1, (distToPlayer - desiredDist) / 90));
+        const tangentX = -dirY * e.orbitDir;
+        const tangentY = dirX * e.orbitDir;
+        e.vx += ((dirX * radialPush * 0.65 + tangentX * 0.8) * e.speed - e.vx) * Math.min(1, dt * 4);
+        e.vy += ((dirY * radialPush * 0.65 + tangentY * 0.8) * e.speed - e.vy) * Math.min(1, dt * 4);
+        e.angle += dt * 2.5;
+        e.stateTimer -= dt;
+        if (e.stateTimer <= 0) {
+          e.stateTimer = 3.9 + Math.random() * 0.9;
+          // Fires a large slow destructible Gravity Orb
+          this.spawnEnemyProjectile(
+            e.x + dirX * e.radius,
+            e.y + dirY * e.radius,
+            dirX * 145,
+            dirY * 145,
+            11,
+            COLORS.vortex,
+            30,
+            'orb',
+            true
+          );
         }
       } else if (e.type === 'shooter') {
         if (e.state === 'orbit') {
-          const desiredDist = 270;
+          const desiredDist = 280;
           const radialPush = Math.max(-1, Math.min(1, (distToPlayer - desiredDist) / 90));
           const tangentX = -dirY * e.orbitDir;
           const tangentY = dirX * e.orbitDir;
@@ -2211,22 +3649,20 @@ export class StarwardEngine {
           e.stateTimer -= dt;
           if (e.stateTimer <= 0) {
             const baseA = Math.atan2(e.aimY, e.aimX);
-            const shots = e.isElite ? 3 : 2;
-            for (let s = 0; s < shots; s++) {
-              const spread = (s / (shots - 1) - 0.5) * 0.22;
-              const spd = 250 + s * 25;
-              this.spawnEnemyProjectile(
-                e.x + Math.cos(baseA) * e.radius,
-                e.y + Math.sin(baseA) * e.radius,
-                Math.cos(baseA + spread) * spd,
-                Math.sin(baseA + spread) * spd,
-                5,
-                COLORS.shooter
-              );
-            }
+            this.spawnEnemyProjectile(
+              e.x + Math.cos(baseA) * e.radius,
+              e.y + Math.sin(baseA) * e.radius,
+              Math.cos(baseA) * 245,
+              Math.sin(baseA) * 245,
+              6,
+              COLORS.shooter,
+              24,
+              'lance',
+              false
+            );
             e.squash = 1.25;
             e.state = 'orbit';
-            e.stateTimer = 1.7 + Math.random() * 0.7;
+            e.stateTimer = 3.1 + Math.random() * 0.9;
           }
         }
       } else if (e.type === 'charger') {
@@ -2237,7 +3673,7 @@ export class StarwardEngine {
           e.stateTimer -= dt;
           if (e.stateTimer <= 0 && distToPlayer < 430) {
             e.state = 'windup';
-            e.stateTimer = 0.72;
+            e.stateTimer = 0.75;
             e.aimX = dirX;
             e.aimY = dirY;
             e.angle = Math.atan2(dy, dx);
@@ -2255,8 +3691,8 @@ export class StarwardEngine {
           if (e.stateTimer <= 0) {
             e.state = 'lunge';
             e.stateTimer = 0.42;
-            e.vx = e.aimX * 560;
-            e.vy = e.aimY * 560;
+            e.vx = e.aimX * 540;
+            e.vy = e.aimY * 540;
             e.squash = 1.4;
             this.spawnBurst(e.x, e.y, 7, COLORS.charger, 120);
           }
@@ -2264,7 +3700,7 @@ export class StarwardEngine {
           e.stateTimer -= dt;
           if (e.stateTimer <= 0) {
             e.state = 'recover';
-            e.stateTimer = 0.55;
+            e.stateTimer = 0.65;
           }
         } else {
           e.vx *= Math.exp(-6 * dt);
@@ -2272,12 +3708,12 @@ export class StarwardEngine {
           e.stateTimer -= dt;
           if (e.stateTimer <= 0) {
             e.state = 'chase';
-            e.stateTimer = 1.3 + Math.random() * 0.6;
+            e.stateTimer = 2.4 + Math.random() * 0.8;
           }
         }
       } else if (e.type === 'pulsar') {
         if (e.state === 'orbit') {
-          const desiredDist = 250;
+          const desiredDist = 260;
           const radialPush = Math.max(-1, Math.min(1, (distToPlayer - desiredDist) / 90));
           const tangentX = -dirY * e.orbitDir;
           const tangentY = dirX * e.orbitDir;
@@ -2298,9 +3734,23 @@ export class StarwardEngine {
           e.angle += dt * 4.5;
           e.stateTimer -= dt;
           if (e.stateTimer <= 0) {
-            this.fireRadialVolley(e, e.isElite ? 6 : 4, 210, COLORS.pulsar);
+            const baseA = Math.atan2(dy, dx);
+            for (let s = -1; s <= 1; s++) {
+              const a = baseA + s * 0.32;
+              this.spawnEnemyProjectile(
+                e.x + Math.cos(a) * e.radius,
+                e.y + Math.sin(a) * e.radius,
+                Math.cos(a) * 195,
+                Math.sin(a) * 195,
+                8,
+                COLORS.pulsar,
+                26,
+                'crescent',
+                false
+              );
+            }
             e.state = 'orbit';
-            e.stateTimer = 2.3 + Math.random() * 0.8;
+            e.stateTimer = 3.5 + Math.random() * 0.9;
             e.squash = 1.3;
           }
         }
@@ -2351,7 +3801,8 @@ export class StarwardEngine {
       if (this.player.invulnTimer <= 0 && this.player.dashTimer <= 0) {
         const pDist = Math.hypot(e.x - this.player.x, e.y - this.player.y);
         if (pDist < e.radius + this.player.radius - 2) {
-          this.damagePlayer(e.x, e.y);
+          const contactDmg = e.isBoss ? 48 : e.type === 'juggernaut' || e.type === 'tank' ? 36 : 24;
+          this.damagePlayer(e.x, e.y, contactDmg);
         }
       }
     }
@@ -2364,11 +3815,12 @@ export class StarwardEngine {
     dirY: number,
     distToPlayer: number
   ): void {
-    const phaseMult = e.bossPhase === 2 ? 1.3 : 1.0;
-    e.angle += dt * 0.9 * phaseMult;
+    const phaseMult = e.bossPhase === 2 ? 1.25 : 1.0;
+    const bossColor = this.getEnemyColor(e);
+    e.angle += dt * 0.85 * phaseMult;
 
     if (e.state === 'orbit') {
-      const desiredDist = 230;
+      const desiredDist = 250;
       const radialPush = Math.max(-1, Math.min(1, (distToPlayer - desiredDist) / 110));
       const tangentX = -dirY * e.orbitDir;
       const tangentY = dirX * e.orbitDir;
@@ -2379,15 +3831,44 @@ export class StarwardEngine {
 
       e.stateTimer -= dt;
       if (e.stateTimer <= 0) {
-        if (e.type === 'boss_aegis' && e.bossPhase === 2 && Math.random() < 0.45) {
+        if ((e.type === 'boss_aegis' || e.type === 'boss_valkyria') && Math.random() < 0.5) {
           e.state = 'windup';
-          e.stateTimer = 0.85;
+          e.stateTimer = 0.9;
           e.aimX = dirX;
           e.aimY = dirY;
           this.sound.playTelegraph();
+        } else if (e.type === 'boss_hydra' || e.type === 'boss_chronovore') {
+          // Telegraphed Cross Laser Beams + Crescent Waves instead of round bullet spam!
+          const beamCount = e.bossPhase === 2 ? 4 : 2;
+          const baseA = Math.atan2(dirY, dirX);
+          for (let b = 0; b < beamCount; b++) {
+            const a = baseA + (b * Math.PI) / (beamCount === 4 ? 2 : 1) + 0.28;
+            this.fieldConstructs.push({
+              kind: 'enemy_telegraph_beam',
+              x: e.x,
+              y: e.y,
+              x2: e.x + Math.cos(a) * 1200,
+              y2: e.y + Math.sin(a) * 1200,
+              vx: 0,
+              vy: 0,
+              angle: a,
+              radius: 22,
+              life: 1.15,
+              maxLife: 1.15,
+              tickTimer: 0,
+              damage: 42,
+              color: bossColor,
+              secondaryColor: '#FFFFFF',
+              hitIds: new Set<number>(),
+            });
+          }
+          e.state = 'spiral_volley';
+          e.stateTimer = 1.4;
+          e.secondaryTimer = 0.25;
+          this.sound.playTelegraph();
         } else {
           e.state = 'spiral_volley';
-          e.stateTimer = 1.6;
+          e.stateTimer = 1.3;
           e.secondaryTimer = 0;
           this.sound.playTelegraph();
         }
@@ -2399,16 +3880,30 @@ export class StarwardEngine {
       e.secondaryTimer -= dt;
 
       if (e.secondaryTimer <= 0) {
-        e.secondaryTimer = e.bossPhase === 2 ? 0.24 : 0.34;
-        const arms = e.type === 'boss_hydra' ? 6 : 5;
-        const spd = e.type === 'boss_hydra' ? 215 : 195;
-        const col = e.type === 'boss_hydra' ? COLORS.bossHydra : COLORS.bossAegis;
-        this.fireRadialVolley(e, arms, spd, col);
+        e.secondaryTimer = e.bossPhase === 2 ? 0.45 : 0.6;
+        const baseA = Math.atan2(dirY, dirX);
+        const count = e.bossPhase === 2 ? 4 : 3;
+        for (let k = 0; k < count; k++) {
+          const offset = (k - (count - 1) * 0.5) * 0.34;
+          const a = baseA + offset;
+          this.spawnEnemyProjectile(
+            e.x + Math.cos(a) * (e.radius + 6),
+            e.y + Math.sin(a) * (e.radius + 6),
+            Math.cos(a) * 205,
+            Math.sin(a) * 205,
+            10,
+            bossColor,
+            34,
+            e.type === 'boss_chronovore' ? 'orb' : 'crescent',
+            e.type === 'boss_chronovore'
+          );
+        }
+        this.spawnShockwave(e.x, e.y, e.radius + 26, bossColor, 2);
       }
 
       if (e.stateTimer <= 0) {
         e.state = 'orbit';
-        e.stateTimer = e.bossPhase === 2 ? 1.5 : 2.1;
+        e.stateTimer = e.bossPhase === 2 ? 2.4 : 3.1;
       }
     } else if (e.state === 'windup') {
       e.vx *= Math.exp(-8 * dt);
@@ -2423,32 +3918,30 @@ export class StarwardEngine {
         e.stateTimer = 0.52;
         e.vx = e.aimX * 520;
         e.vy = e.aimY * 520;
-        this.spawnShockwave(e.x, e.y, 110, COLORS.bossAegis, 3);
+        this.spawnShockwave(e.x, e.y, 120, bossColor, 3);
       }
     } else if (e.state === 'lunge') {
       e.stateTimer -= dt;
       if (e.stateTimer <= 0) {
-        this.fireRadialVolley(e, 8, 200, COLORS.bossAegis);
+        // Fires 4 wide Crescent Blade Waves on lunge recovery
+        for (let k = 0; k < 4; k++) {
+          const a = e.angle + (k * Math.PI) / 2;
+          this.spawnEnemyProjectile(
+            e.x + Math.cos(a) * e.radius,
+            e.y + Math.sin(a) * e.radius,
+            Math.cos(a) * 195,
+            Math.sin(a) * 195,
+            11,
+            bossColor,
+            36,
+            'crescent',
+            false
+          );
+        }
         e.state = 'orbit';
-        e.stateTimer = 1.6;
+        e.stateTimer = 2.6;
       }
     }
-  }
-
-  private fireRadialVolley(e: Enemy, count: number, bulletSpeed: number, color: string): void {
-    const baseAngle = e.angle;
-    for (let k = 0; k < count; k++) {
-      const a = baseAngle + (k * Math.PI * 2) / count;
-      this.spawnEnemyProjectile(
-        e.x + Math.cos(a) * (e.radius + 4),
-        e.y + Math.sin(a) * (e.radius + 4),
-        Math.cos(a) * bulletSpeed,
-        Math.sin(a) * bulletSpeed,
-        5.5,
-        color
-      );
-    }
-    this.spawnShockwave(e.x, e.y, e.radius + 26, color, 2);
   }
 
   private spawnEnemyProjectile(
@@ -2457,7 +3950,10 @@ export class StarwardEngine {
     vx: number,
     vy: number,
     radius: number,
-    color: string
+    color: string,
+    damage = 24,
+    shape: 'lance' | 'crescent' | 'orb' | 'mine' = 'lance',
+    destructible = false
   ): void {
     for (const b of this.enemyBullets) {
       if (!b.active) {
@@ -2466,9 +3962,13 @@ export class StarwardEngine {
         b.y = y;
         b.vx = vx;
         b.vy = vy;
-        b.life = 4.5;
+        b.life = shape === 'mine' ? 6.0 : 4.5;
+        b.maxLife = b.life;
         b.radius = radius;
         b.color = color;
+        b.damage = damage;
+        b.shape = shape;
+        b.destructible = destructible;
         return;
       }
     }
@@ -2482,11 +3982,18 @@ export class StarwardEngine {
 
     for (const b of this.enemyBullets) {
       if (!b.active) continue;
+      if (b.shape === 'mine') {
+        b.vx *= Math.exp(-2.5 * dt);
+        b.vy *= Math.exp(-2.5 * dt);
+      }
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.life -= dt;
 
       if (b.life <= 0 || b.x < minX || b.x > maxX || b.y < minY || b.y > maxY) {
+        if (b.shape === 'mine' && b.life <= 0) {
+          this.spawnShockwave(b.x, b.y, 65, b.color, 2.2);
+        }
         b.active = false;
         continue;
       }
@@ -2495,16 +4002,33 @@ export class StarwardEngine {
         const dist = Math.hypot(b.x - this.player.x, b.y - this.player.y);
         if (dist < b.radius + this.player.radius - 2) {
           b.active = false;
-          this.damagePlayer(b.x, b.y);
+          this.damagePlayer(b.x, b.y, b.damage || 24);
         }
       }
     }
   }
 
-  private damagePlayer(sourceX: number, sourceY: number): void {
+  private damagePlayer(sourceX: number, sourceY: number, rawDamage = 26): void {
     const p = this.player;
-    p.shields -= 1;
-    p.invulnTimer = 1.4;
+    let damageMult = 1.0;
+
+    // Titan Overdrive or Titan Hexagonal Dome reduces incoming HP damage
+    if (this.shipId === 'titan' && p.overdriveTimer > 0) {
+      damageMult *= 0.35;
+    } else {
+      for (const c of this.fieldConstructs) {
+        if (c.kind === 'titan_dome' && Math.hypot(p.x - c.x, p.y - c.y) <= c.radius) {
+          damageMult *= 0.5;
+          break;
+        }
+      }
+    }
+
+    const finalDmg = Math.max(5, Math.round(rawDamage * damageMult));
+    p.hp = Math.max(0, p.hp - finalDmg);
+    p.shields = Math.ceil(p.hp);
+    p.outOfCombatTimer = 0;
+    p.invulnTimer = 1.05;
     p.hitFlash = 0.16;
     p.squashX = 1.35;
     p.squashY = 0.65;
@@ -2512,29 +4036,30 @@ export class StarwardEngine {
     const dx = p.x - sourceX;
     const dy = p.y - sourceY;
     const dist = Math.max(Math.hypot(dx, dy), 1);
-    p.vx = (dx / dist) * 320;
-    p.vy = (dy / dist) * 320;
+    p.vx = (dx / dist) * 290;
+    p.vy = (dy / dist) * 290;
 
     this.multiplier = Math.max(1, Math.floor(this.multiplier / 2));
     this.comboTimer = this.multiplier > 1 ? this.maxComboDuration * 0.5 : 0;
 
-    this.hitstopTimer = 0.055;
-    this.addShake(11);
+    this.hitstopTimer = 0.045;
+    this.addShake(9);
     this.sound.playPlayerDamage();
-    this.spawnBurst(p.x, p.y, 24, COLORS.charger, 260);
-    this.spawnShockwave(p.x, p.y, 125, COLORS.charger, 3);
+    this.spawnBurst(p.x, p.y, 20, COLORS.charger, 240);
+    this.spawnShockwave(p.x, p.y, 115, COLORS.charger, 2.8);
 
     for (const e of this.enemies) {
       const edx = e.x - p.x;
       const edy = e.y - p.y;
       const eDist = Math.hypot(edx, edy);
-      if (eDist > 0 && eDist < 180 && !e.isBoss) {
-        e.vx += (edx / eDist) * 280;
-        e.vy += (edy / eDist) * 280;
+      if (eDist > 0 && eDist < 170 && !e.isBoss) {
+        e.vx += (edx / eDist) * 260;
+        e.vy += (edy / eDist) * 260;
       }
     }
 
-    if (p.shields <= 0) {
+    if (p.hp <= 0) {
+      p.hp = 0;
       p.shields = 0;
       savePlayerProfile(this.profile);
       this.callbacks.onProfileUpdate({ ...this.profile });
@@ -2543,7 +4068,7 @@ export class StarwardEngine {
       return;
     }
 
-    this.spawnFloatingText(p.x, p.y - 24, 'MẤT 1 SINH MẠNG!', COLORS.charger);
+    this.spawnFloatingText(p.x, p.y - 24, `-${finalDmg} HP!`, COLORS.charger);
     this.pushHud(true);
   }
 
@@ -2605,9 +4130,11 @@ export class StarwardEngine {
       if (dist < p.radius + 15) {
         s.active = false;
         if (s.isRepair) {
-          if (this.mode !== 'hardcore' && p.shields < p.maxShields) {
-            p.shields += 1;
-            this.spawnFloatingText(p.x, p.y - 22, '+1 SINH MẠNG', COLORS.repair);
+          if (this.mode !== 'hardcore' && p.hp < p.maxHp) {
+            const heal = Math.max(45, Math.round(p.maxHp * 0.18));
+            p.hp = Math.min(p.maxHp, p.hp + heal);
+            p.shields = Math.ceil(p.hp);
+            this.spawnFloatingText(p.x, p.y - 22, `+${heal} HP`, COLORS.repair);
           } else {
             this.addScore(180 * this.multiplier);
             this.spawnFloatingText(p.x, p.y - 22, `+${180 * this.multiplier}`, COLORS.repair);
@@ -2623,7 +4150,7 @@ export class StarwardEngine {
 
           const modeShardMult =
             this.mode === 'hardcore' ? 2 : this.mode === 'boss_rush' ? 1.5 : 1;
-          const magnetBonus = 1 + (this.profile.hangarLevels.magnet ?? 0) * 0.1;
+          const magnetBonus = 1 + (this.profile.hangarLevels.magnet ?? 0) * 0.12;
           const gainedShards = Math.max(
             1,
             Math.round(s.shardCurrency * modeShardMult * magnetBonus)
@@ -2631,13 +4158,6 @@ export class StarwardEngine {
 
           this.runShards += gainedShards;
           this.profile.starShards += gainedShards;
-
-          if (p.overdriveTimer <= 0) {
-            p.overdriveCharge = Math.min(
-              100,
-              p.overdriveCharge + 2.4 * p.overdriveGainMult
-            );
-          }
 
           const pts = s.value * this.multiplier * (hasHyperMagnet ? 2 : 1);
           this.addScore(pts);
@@ -2794,9 +4314,17 @@ export class StarwardEngine {
   private getActiveBossInfo(): BossHudInfo | null {
     const boss = this.enemies.find((e) => e.isBoss);
     if (!boss) return null;
+    const bossName =
+      boss.type === 'boss_aegis'
+        ? 'PHÁO ĐÀI AEGIS'
+        : boss.type === 'boss_hydra'
+        ? 'XÀ VƯƠNG MẶT TRỜI'
+        : boss.type === 'boss_valkyria'
+        ? 'NỮ HOÀNG KIẾM KHÍ VALKYRIA'
+        : 'CHÚA TỂ HƯ KHÔNG CHRONOVORE';
     return {
-      name: boss.type === 'boss_aegis' ? 'PHÁO ĐÀI AEGIS' : 'XÀ VƯƠNG MẶT TRỜI',
-      subtitle: boss.bossPhase === 2 ? 'Pha 2 · Cuồng Nộ' : 'Pha 1 · Phòng Tuyến',
+      name: bossName,
+      subtitle: boss.bossPhase === 2 ? 'Pha 2 · Cuồng Nộ Thức Tỉnh' : 'Pha 1 · Phòng Tuyến Chiến Hạm',
       hp: Math.max(0, Math.ceil(boss.hp)),
       maxHp: Math.ceil(boss.maxHp),
       phase: boss.bossPhase,
@@ -2822,11 +4350,15 @@ export class StarwardEngine {
   }
 
   private pushHud(force: boolean): void {
-    const dashCharge = Math.max(
-      0,
-      Math.min(1, 1 - this.player.dashCooldown / this.player.dashMaxCooldown)
-    );
-    const overdriveCharge = Math.max(0, Math.min(1, this.player.overdriveCharge / 100));
+    const p = this.player;
+    const ship = SHIPS[this.shipId] ?? SHIPS.vanguard;
+    const h = this.profile.hangarLevels;
+
+    const dashCharge = Math.max(0, Math.min(1, 1 - p.dashCooldown / p.dashMaxCooldown));
+    const holdChargeRatio = p.isChargingDash ? Math.min(1, p.holdChargeTimer / 1.05) : 0;
+    // Fixed Overdrive 0..100 percentage so HUD never shows 1% when full!
+    const overdriveCharge = Math.max(0, Math.min(100, Math.round(p.overdriveCharge)));
+    const overdriveTimeLeft = Math.max(0, Number(p.overdriveTimer.toFixed(1)));
     const comboProgress =
       this.multiplier > 1 ? Math.max(0, Math.min(1, this.comboTimer / this.maxComboDuration)) : 0;
     const waveProgress =
@@ -2836,7 +4368,46 @@ export class StarwardEngine {
     const activeBoosts = this.getActiveBoostsHud();
     const boostSig = activeBoosts.map((b) => `${b.type}:${Math.round(b.remaining * 10)}`).join(',');
 
-    const sig = `${this.score}|${bestScore}|${this.multiplier}|${Math.round(comboProgress * 20)}|${this.wave}|${Math.round(waveProgress * 20)}|${this.player.shields}|${this.player.maxShields}|${Math.round(dashCharge * 20)}|${Math.round(overdriveCharge * 25)}|${this.player.overdriveTimer > 0}|${this.player.weapon}|${this.runShards}|${this.profile.starShards}|${this.totalEnemiesDefeated}|${this.waveBanner ?? ''}|${this.currentSector.id}|${boostSig}|${boss?.hp ?? 0}|${this.gameState}`;
+    // Calculate live upgraded stats in battle (Hangar + Perks + Active Boosts)
+    const activeDmgMult =
+      p.damageMult *
+      (p.overdriveTimer > 0 ? 1.35 : 1.0) *
+      (this.activeBoostTimers.damage_surge > 0 ? 1.6 : 1.0);
+    const activeFireRateMult =
+      p.fireRateMult *
+      (p.overdriveTimer > 0 ? 1.85 : 1.0) *
+      (this.activeBoostTimers.rapid_fire > 0 ? 1.65 : 1.0);
+    const activeSpeedMult =
+      p.speedMult *
+      (p.overdriveTimer > 0 ? 1.24 : 1.0) *
+      (this.activeBoostTimers.hyper_speed > 0 ? 1.55 : 1.0);
+
+    const liveStats = {
+      damageBonusPct: Math.round((activeDmgMult - 1) * 100),
+      fireRateBonusPct: Math.round((activeFireRateMult - 1) * 100),
+      speedBonusPct: Math.round((activeSpeedMult - 1) * 100),
+      bonusMaxHp: Math.max(0, Math.round(p.maxHp - ship.baseHp)),
+      hpRegenPerSec: Number(
+        (
+          p.hpRegenRate +
+          (this.shipId === 'solaris' && p.overdriveTimer > 0 ? 12 : 0)
+        ).toFixed(1)
+      ),
+      dashCooldownSec: Number(p.dashMaxCooldown.toFixed(2)),
+      magnetRadiusPx: Math.round(
+        this.activeBoostTimers.hyper_magnet > 0 ? 1800 : p.magnetRadius
+      ),
+      shardBonusPct: Math.round((h.magnet ?? 0) * 12),
+      overdriveGainBonusPct: Math.round((p.overdriveGainMult - 1) * 100),
+      extraBarrels: p.extraBarrels,
+      bonusPierce: p.bonusPierce + (this.activeBoostTimers.damage_surge > 0 ? 1 : 0),
+      hangarLevels: { ...h },
+    };
+
+    const hpInt = Math.ceil(p.hp);
+    const maxHpInt = Math.ceil(p.maxHp);
+
+    const sig = `${this.score}|${bestScore}|${this.multiplier}|${Math.round(comboProgress * 20)}|${this.wave}|${Math.round(waveProgress * 20)}|${hpInt}|${maxHpInt}|${Math.round(dashCharge * 20)}|${Math.round(holdChargeRatio * 20)}|${overdriveCharge}|${overdriveTimeLeft}|${p.weapon}|${p.weaponLevel}|${this.runShards}|${this.profile.starShards}|${this.totalEnemiesDefeated}|${this.waveBanner ?? ''}|${this.currentSector.id}|${this.profile.dashDirectionMode}|${boostSig}|${boss?.hp ?? 0}|${liveStats.damageBonusPct}|${liveStats.fireRateBonusPct}|${this.gameState}`;
     if (!force && sig === this.lastHudSignature) return;
     this.lastHudSignature = sig;
 
@@ -2847,13 +4418,17 @@ export class StarwardEngine {
       comboProgress,
       wave: this.wave,
       waveProgress,
-      shields: this.player.shields,
-      maxShields: this.player.maxShields,
+      hp: hpInt,
+      maxHp: maxHpInt,
+      shields: hpInt,
+      maxShields: maxHpInt,
       dashCharge,
+      holdChargeRatio,
       overdriveCharge,
-      overdriveActive: this.player.overdriveTimer > 0,
-      weapon: this.player.weapon,
-      weaponLevel: this.player.weaponLevel,
+      overdriveActive: p.overdriveTimer > 0,
+      overdriveTimeLeft,
+      weapon: p.weapon,
+      weaponLevel: p.weaponLevel,
       runShards: this.runShards,
       totalShards: this.profile.starShards,
       enemiesDefeated: this.totalEnemiesDefeated,
@@ -2865,10 +4440,12 @@ export class StarwardEngine {
       isNewBest: this.isNewBest,
       mode: this.mode,
       shipId: this.shipId,
+      dashDirectionMode: this.profile.dashDirectionMode ?? 'mouse',
       activePerks: this.activePerks,
       perkChoices: this.currentPerkChoices,
       activeBoosts,
       boss,
+      liveStats,
     });
   }
 
@@ -2899,6 +4476,7 @@ export class StarwardEngine {
     this.renderArenaBounds(ctx);
     this.renderShards(ctx);
     this.renderBoostPickups(ctx);
+    this.renderFieldConstructs(ctx);
     this.renderShockwaves(ctx);
     this.renderLightningArcs(ctx);
     this.renderEnemyBullets(ctx);

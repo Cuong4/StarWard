@@ -2,6 +2,8 @@ export type GameState = 'TITLE_MENU' | 'PLAYING' | 'PERK_SELECT' | 'PAUSED' | 'G
 
 export type GameMode = 'arcade' | 'boss_rush' | 'hardcore';
 
+export type DashDirectionMode = 'mouse' | 'movement';
+
 export type ShipId =
   | 'vanguard'
   | 'phantom'
@@ -12,7 +14,12 @@ export type ShipId =
   | 'tempest'
   | 'solaris'
   | 'aether'
-  | 'chronos';
+  | 'chronos'
+  | 'omega'
+  | 'celestia'
+  | 'leviathan'
+  | 'hyperion'
+  | 'apocalypse';
 
 export type DashEffectStyle =
   | 'solar_flare'
@@ -24,7 +31,12 @@ export type DashEffectStyle =
   | 'ion_tempest'
   | 'golden_phoenix'
   | 'prism_mirror'
-  | 'chrono_warp';
+  | 'chrono_warp'
+  | 'omega_burst'
+  | 'starlight_step'
+  | 'abyss_tide'
+  | 'ricochet_blade'
+  | 'dimension_slash';
 
 export type WeaponType = 'pulse' | 'spread' | 'rail' | 'missile';
 
@@ -39,8 +51,14 @@ export type EnemyType =
   | 'chaser'
   | 'shooter'
   | 'tank'
+  | 'sniper'
+  | 'bomber'
+  | 'vortex'
+  | 'juggernaut'
   | 'boss_aegis'
-  | 'boss_hydra';
+  | 'boss_hydra'
+  | 'boss_valkyria'
+  | 'boss_chronovore';
 
 export type HangarUpgradeId = 'hull' | 'firepower' | 'thruster' | 'magnet' | 'overdrive';
 
@@ -75,6 +93,7 @@ export interface ShipConfig {
   role: string;
   description: string;
   cost: number;
+  baseHp: number;
   baseShields: number;
   speedMult: number;
   fireRateMult: number;
@@ -87,6 +106,12 @@ export interface ShipConfig {
   dashEffectName: string;
   dashEffectDesc: string;
   dashStyle: DashEffectStyle;
+  chargeSkillName: string;
+  chargeSkillDesc: string;
+  overdriveEffectName: string;
+  overdriveEffectDesc: string;
+  hullScale: number;
+  isMythic?: boolean;
   stats: {
     speed: number;
     shield: number;
@@ -133,6 +158,7 @@ export interface PlayerProfile {
   unlockedShips: ShipId[];
   selectedShip: ShipId;
   selectedMode: GameMode;
+  dashDirectionMode: DashDirectionMode;
   hangarLevels: Record<HangarUpgradeId, number>;
   achievements: Record<string, number>;
   bestScores: Record<GameMode, number>;
@@ -161,6 +187,21 @@ export interface ActiveBoostHud {
   duration: number;
 }
 
+export interface LiveCombatStats {
+  damageBonusPct: number;
+  fireRateBonusPct: number;
+  speedBonusPct: number;
+  bonusMaxHp: number;
+  hpRegenPerSec: number;
+  dashCooldownSec: number;
+  magnetRadiusPx: number;
+  shardBonusPct: number;
+  overdriveGainBonusPct: number;
+  extraBarrels: number;
+  bonusPierce: number;
+  hangarLevels: Record<HangarUpgradeId, number>;
+}
+
 export interface HudSnapshot {
   score: number;
   bestScore: number;
@@ -168,11 +209,15 @@ export interface HudSnapshot {
   comboProgress: number;
   wave: number;
   waveProgress: number;
+  hp: number;
+  maxHp: number;
   shields: number;
   maxShields: number;
   dashCharge: number;
+  holdChargeRatio: number;
   overdriveCharge: number;
   overdriveActive: boolean;
+  overdriveTimeLeft: number;
   weapon: WeaponType;
   weaponLevel: number;
   runShards: number;
@@ -186,10 +231,12 @@ export interface HudSnapshot {
   isNewBest: boolean;
   mode: GameMode;
   shipId: ShipId;
+  dashDirectionMode: DashDirectionMode;
   activePerks: string[];
   perkChoices: PerkDefinition[];
   activeBoosts: ActiveBoostHud[];
   boss: BossHudInfo | null;
+  liveStats: LiveCombatStats;
 }
 
 export interface Star {
@@ -214,6 +261,7 @@ export interface PlayerBullet {
   pierce: number;
   homing: boolean;
   color: string;
+  shape?: 'bolt' | 'crescent' | 'orb' | 'star' | 'beam_node';
   hitEnemyIds: Set<number>;
 }
 
@@ -224,8 +272,12 @@ export interface EnemyBullet {
   vx: number;
   vy: number;
   life: number;
+  maxLife?: number;
   radius: number;
   color: string;
+  damage: number;
+  shape?: 'lance' | 'crescent' | 'orb' | 'mine';
+  destructible?: boolean;
 }
 
 export interface Enemy {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { GameMode, PlayerProfile } from '../game/types';
-import { ACHIEVEMENTS, GAME_MODES, SHIPS, WEAPONS, formatKeyLabel } from '../game/catalog';
+import { ACHIEVEMENTS, GAME_MODES, SHIPS, SHIP_LIST, WEAPONS, formatKeyLabel } from '../game/catalog';
 import { ShipSvgIcon } from './HangarModal';
 
 interface TitleOverlayProps {
@@ -60,7 +60,7 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
               STAR<span className="text-amber-400">WARD</span>
             </h1>
             <p className="font-display text-xs uppercase tracking-[0.22em] text-cyan-400 mt-1.5">
-              CHIẾN TRƯỜNG TINH HÀ • 10 CHIẾN CƠ • 8 CHIẾN KHU BIẾN ĐỔI
+              CHIẾN TRƯỜNG TINH HÀ • 15 CHIẾN CƠ • TỤ LỰC BÙNG PHÁ • 8 CHIẾN KHU
             </p>
           </div>
 
@@ -123,18 +123,18 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
           </div>
         </div>
 
-        {/* Active Ship & Unique Dash Preview Card */}
+        {/* Active Ship & Unique Dash / Charge / Overdrive Preview Card */}
         <div className="mt-5 grid grid-cols-1 md:grid-cols-12 gap-3 bg-slate-900/75 border border-slate-800/90 p-4">
           <div className="md:col-span-7 flex items-start gap-3.5">
             <div
               className="w-14 h-14 flex items-center justify-center border bg-slate-950/90 shrink-0 mt-0.5"
               style={{ borderColor: currentShip.accentColor }}
             >
-              <ShipSvgIcon id={currentShip.id} color={currentShip.accentColor} size={38} />
+              <ShipSvgIcon id={currentShip.id} color={currentShip.accentColor} size={40} />
             </div>
             <div>
               <span className="font-mono text-[9px] uppercase tracking-widest text-slate-400 block">
-                CHIẾN CƠ ĐANG TRANG BỊ ({profile.unlockedShips.length}/10 ĐÃ MỞ)
+                CHIẾN CƠ ĐANG TRANG BỊ ({profile.unlockedShips.length}/{SHIP_LIST.length} ĐÃ MỞ) • {currentShip.baseHp} HP
               </span>
               <div className="flex flex-wrap items-center gap-2 mt-0.5">
                 <span
@@ -148,16 +148,19 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
                   {currentWeapon.name}
                 </span>
               </div>
-              <div className="mt-1.5 flex items-center gap-2">
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <span
                   className="font-mono text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-slate-950 border"
                   style={{ color: currentShip.dashColor, borderColor: `${currentShip.dashColor}66` }}
                 >
                   LƯỚT [{dashKey}]: {currentShip.dashEffectName}
                 </span>
+                <span className="font-mono text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-slate-950 border border-amber-500/40 text-amber-300">
+                  ĐÈ [{dashKey}]: {currentShip.chargeSkillName}
+                </span>
               </div>
-              <p className="text-xs text-slate-400 mt-1">
-                {currentShip.dashEffectDesc}
+              <p className="text-xs text-slate-300 mt-1">
+                <strong className="text-rose-300">Nộ [{overdriveKey}] (10s):</strong> {currentShip.overdriveEffectName} — {currentShip.overdriveEffectDesc}
               </p>
             </div>
           </div>
@@ -165,17 +168,20 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
           <div className="md:col-span-5 flex flex-col justify-between border-t md:border-t-0 md:border-l border-slate-800 pt-3 md:pt-0 md:pl-4">
             <div>
               <span className="font-mono text-[9px] uppercase tracking-widest text-cyan-400 block">
-                CẤU HÌNH PHÍM TẮT PC HIỆN TẠI
+                CẤU HÌNH CHIẾN ĐẤU PC HIỆN TẠI
               </span>
               <div className="font-mono text-xs text-slate-200 mt-1 space-y-1">
                 <div>
-                  • Lướt Chiến Thuật: <strong className="text-cyan-300">[{dashKey}]</strong> hoặc <strong className="text-cyan-300">[Chuột Phải]</strong>
+                  • Lướt / Đè Tụ Lực: <strong className="text-cyan-300">[{dashKey}]</strong> hoặc <strong className="text-cyan-300">[Chuột Phải]</strong>
                 </div>
                 <div>
-                  • Chiêu Cuối Overdrive: <strong className="text-amber-400">[{overdriveKey}]</strong>
+                  • Hướng Lướt:{' '}
+                  <strong className="text-amber-300">
+                    {profile.dashDirectionMode === 'movement' ? 'Theo Di Chuyển (WASD)' : 'Theo Con Trỏ Chuột'}
+                  </strong>
                 </div>
                 <div>
-                  • Hạ địch rơi <strong className="text-emerald-400">4 loại Ngọc Boost</strong> &amp; đổi màu chiến khu mỗi Wave!
+                  • Tuyệt Kỹ Nộ 10s: <strong className="text-rose-400">[{overdriveKey}]</strong> (Tích nộ khi gây dame)
                 </div>
               </div>
             </div>
@@ -183,7 +189,7 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
               onClick={onOpenKeybinds}
               className="mt-2.5 w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-300 font-mono text-[11px] font-bold uppercase tracking-widest border border-cyan-500/40 transition-colors cursor-pointer"
             >
-              ⌨ TÙY CHỈNH NÚT ĐIỀU KHIỂN
+              ⌨ TÙY CHỈNH NÚT &amp; HƯỚNG LƯỚT
             </button>
           </div>
         </div>
@@ -204,7 +210,7 @@ export const TitleOverlay: React.FC<TitleOverlayProps> = ({
             onClick={onOpenHangar}
             className="sm:col-span-4 py-4 px-4 bg-[#141C2B] hover:bg-slate-800 text-cyan-300 font-display font-bold text-xs uppercase tracking-[0.15em] border border-cyan-500/40 transition-colors cursor-pointer"
           >
-            XƯỞNG CHIẾN CƠ (10 TÀU)
+            XƯỞNG CHIẾN CƠ (15 TÀU)
           </button>
 
           <button

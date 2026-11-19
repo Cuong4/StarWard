@@ -3,6 +3,7 @@ import { SoundEngine } from './game/audio';
 import { StarwardEngine } from './game/engine';
 import {
   AchievementDefinition,
+  DashDirectionMode,
   GameMode,
   GameState,
   HangarUpgradeId,
@@ -28,11 +29,15 @@ const INITIAL_HUD: HudSnapshot = {
   comboProgress: 0,
   wave: 1,
   waveProgress: 0,
-  shields: 3,
-  maxShields: 3,
+  hp: 300,
+  maxHp: 300,
+  shields: 300,
+  maxShields: 300,
   dashCharge: 1,
+  holdChargeRatio: 0,
   overdriveCharge: 0,
   overdriveActive: false,
+  overdriveTimeLeft: 0,
   weapon: 'pulse',
   weaponLevel: 1,
   runShards: 0,
@@ -46,10 +51,31 @@ const INITIAL_HUD: HudSnapshot = {
   isNewBest: false,
   mode: 'arcade',
   shipId: 'vanguard',
+  dashDirectionMode: 'mouse',
   activePerks: [],
   perkChoices: [],
   activeBoosts: [],
   boss: null,
+  liveStats: {
+    damageBonusPct: 0,
+    fireRateBonusPct: 0,
+    speedBonusPct: 0,
+    bonusMaxHp: 0,
+    hpRegenPerSec: 6,
+    dashCooldownSec: 2.0,
+    magnetRadiusPx: 145,
+    shardBonusPct: 0,
+    overdriveGainBonusPct: 0,
+    extraBarrels: 0,
+    bonusPierce: 0,
+    hangarLevels: {
+      hull: 0,
+      firepower: 0,
+      thruster: 0,
+      magnet: 0,
+      overdrive: 0,
+    },
+  },
 };
 
 export function App() {
@@ -64,6 +90,7 @@ export function App() {
     shipId: profile.selectedShip,
     mode: profile.selectedMode,
     totalShards: profile.starShards,
+    dashDirectionMode: profile.dashDirectionMode ?? 'mouse',
   }));
   const [muted, setMuted] = useState(false);
   const [modal, setModal] = useState<'none' | 'hangar' | 'achievements' | 'keybinds' | 'pcdownload'>('none');
@@ -160,6 +187,12 @@ export function App() {
     });
   };
 
+  const handleUpdateDashDirection = (mode: DashDirectionMode) => {
+    engineRef.current?.updateProfile((draft) => {
+      draft.dashDirectionMode = mode;
+    });
+  };
+
   return (
     <main className="relative w-screen h-screen overflow-hidden bg-[#07090E] select-none">
       {/* Primary Full-Viewport Interactive Canvas */}
@@ -188,6 +221,7 @@ export function App() {
           muted={muted}
           onPause={handlePause}
           onToggleMute={handleToggleMute}
+          onToggleDashDirection={handleUpdateDashDirection}
           onOpenKeybinds={() => {
             if (gameState === 'PLAYING') {
               engineRef.current?.pauseGame();
@@ -230,11 +264,13 @@ export function App() {
         />
       )}
 
-      {/* Keybindings Customization Modal */}
+      {/* Keybindings & Dash Direction Customization Modal */}
       {modal === 'keybinds' && (
         <KeybindsModal
           keybinds={profile.keybinds}
+          dashDirectionMode={profile.dashDirectionMode ?? 'mouse'}
           onUpdateKeybinds={handleUpdateKeybinds}
+          onUpdateDashDirection={handleUpdateDashDirection}
           onClose={() => setModal('none')}
         />
       )}

@@ -1,18 +1,30 @@
 import React, { useEffect, useState } from 'react';
-import { KeybindConfig } from '../game/types';
+import { DashDirectionMode, KeybindConfig } from '../game/types';
 import { DEFAULT_KEYBINDS, formatKeyLabel } from '../game/catalog';
 
 type KeybindAction = keyof KeybindConfig;
 
 interface KeybindsModalProps {
   keybinds: KeybindConfig;
+  dashDirectionMode: DashDirectionMode;
   onUpdateKeybinds: (next: KeybindConfig) => void;
+  onUpdateDashDirection: (mode: DashDirectionMode) => void;
   onClose: () => void;
 }
 
 const KEYBIND_ROWS: { action: KeybindAction; label: string; desc: string; highlight?: boolean }[] = [
-  { action: 'dash', label: 'KỸ NĂNG LƯỚT (DASH)', desc: 'Kích hoạt động cơ phản lực lướt xuyên đạn & tung tuyệt kỹ riêng của tàu', highlight: true },
-  { action: 'overdrive', label: 'CHIÊU CUỐI OVERDRIVE', desc: 'Giải phóng 100% năng lượng Overdrive quét sạch chiến trường', highlight: true },
+  {
+    action: 'dash',
+    label: 'KỸ NĂNG LƯỚT & ĐÈ GIỮ TỤ LỰC (DASH / CHARGE)',
+    desc: 'Nhấn nhanh để lướt xuyên đạn; hoặc ĐÈ GIỮ 1 giây rồi thả để bùng nổ Siêu Kỹ Năng Tụ Lực riêng của tàu',
+    highlight: true,
+  },
+  {
+    action: 'overdrive',
+    label: 'CHIÊU CUỐI NỘ OVERDRIVE (10 GIÂY)',
+    desc: 'Gây sát thương lên địch để tích đủ 100% Nộ, kích hoạt 10 giây siêu sức mạnh 3D riêng biệt của từng tàu',
+    highlight: true,
+  },
   { action: 'up', label: 'BAY LÊN TRÊN', desc: 'Điều khiển chiến cơ tiến lên phía bắc bản đồ' },
   { action: 'down', label: 'BAY XUỐNG DƯỚI', desc: 'Điều khiển chiến cơ lùi xuống phía nam bản đồ' },
   { action: 'left', label: 'BAY SANG TRÁI', desc: 'Điều khiển chiến cơ dịch chuyển sang trái' },
@@ -23,7 +35,9 @@ const KEYBIND_ROWS: { action: KeybindAction; label: string; desc: string; highli
 
 export const KeybindsModal: React.FC<KeybindsModalProps> = ({
   keybinds,
+  dashDirectionMode,
   onUpdateKeybinds,
+  onUpdateDashDirection,
   onClose,
 }) => {
   const [listeningAction, setListeningAction] = useState<KeybindAction | null>(null);
@@ -52,6 +66,7 @@ export const KeybindsModal: React.FC<KeybindsModalProps> = ({
 
   const handleResetDefaults = () => {
     onUpdateKeybinds({ ...DEFAULT_KEYBINDS });
+    onUpdateDashDirection('mouse');
     setListeningAction(null);
   };
 
@@ -64,10 +79,10 @@ export const KeybindsModal: React.FC<KeybindsModalProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-cyan-400">
-              CẤU HÌNH ĐIỀU KHIỂN PC
+              CẤU HÌNH ĐIỀU KHIỂN PC &amp; CƠ CHẾ LƯỚT
             </div>
             <h2 className="font-display text-2xl font-bold uppercase tracking-wider text-slate-100 mt-0.5">
-              TÙY CHỈNH PHÍM TẮT CHIẾN ĐẤU
+              TÙY CHỈNH PHÍM TẮT &amp; HƯỚNG LƯỚT
             </h2>
           </div>
 
@@ -79,11 +94,53 @@ export const KeybindsModal: React.FC<KeybindsModalProps> = ({
           </button>
         </div>
 
+        {/* Dash Direction Mode Selector */}
+        <div className="mt-4 p-4 bg-[#12192B] border border-amber-500/40">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-amber-400 font-bold mb-2">
+            CHẾ ĐỘ HƯỚNG KỸ NĂNG LƯỚT [Q / CHUỘT PHẢI]
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <button
+              type="button"
+              onClick={() => onUpdateDashDirection('mouse')}
+              className={`p-3 text-left border transition-all cursor-pointer ${
+                dashDirectionMode === 'mouse'
+                  ? 'bg-amber-500/20 border-amber-400 text-slate-100'
+                  : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <div className="font-display text-xs font-bold uppercase tracking-wider text-amber-300">
+                🎯 LƯỚT THEO HƯỚNG CON CHUỘT
+              </div>
+              <p className="text-[11px] text-slate-300 mt-1">
+                Chiến cơ sẽ lao thẳng về vị trí tâm ngắm con trỏ chuột hiện tại trên màn hình.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onUpdateDashDirection('movement')}
+              className={`p-3 text-left border transition-all cursor-pointer ${
+                dashDirectionMode === 'movement'
+                  ? 'bg-cyan-500/20 border-cyan-400 text-slate-100'
+                  : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <div className="font-display text-xs font-bold uppercase tracking-wider text-cyan-300">
+                ⌨ LƯỚT THEO HƯỚNG DI CHUYỂN (WASD)
+              </div>
+              <p className="text-[11px] text-slate-300 mt-1">
+                Chiến cơ lướt theo hướng phím di chuyển bạn đang bấm (nếu đứng yên sẽ lướt theo chuột).
+              </p>
+            </button>
+          </div>
+        </div>
+
         <p className="text-xs text-slate-400 mt-3 leading-relaxed">
-          Nhấn vào nút phím ở bất kỳ dòng nào rồi bấm phím mới trên bàn phím để gán lại. Bạn cũng có thể dùng <span className="text-cyan-300 font-semibold">Chuột Trái</span> để bắn và <span className="text-cyan-300 font-semibold">Chuột Phải</span> để Lướt nhanh.
+          Nhấn vào nút phím ở bất kỳ dòng nào rồi bấm phím mới trên bàn phím để gán lại. Bạn có thể <span className="text-amber-300 font-semibold">Đè giữ phím Lướt (hoặc Chuột Phải) 1 giây</span> để tụ năng lượng và tung Siêu Tuyệt Kỹ Bùng Phá!
         </p>
 
-        <div className="mt-4 space-y-2.5 max-h-[55vh] overflow-y-auto pr-1">
+        <div className="mt-3 space-y-2 max-h-[44vh] overflow-y-auto pr-1">
           {KEYBIND_ROWS.map((row) => {
             const isListening = listeningAction === row.action;
             const currentCode = keybinds[row.action];
@@ -123,7 +180,7 @@ export const KeybindsModal: React.FC<KeybindsModalProps> = ({
           })}
         </div>
 
-        <div className="mt-6 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="mt-5 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={handleResetDefaults}
             className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 font-mono text-xs uppercase tracking-widest border border-slate-700 transition-colors cursor-pointer"

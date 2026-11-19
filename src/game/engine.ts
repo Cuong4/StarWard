@@ -4725,19 +4725,483 @@ export class StarwardEngine {
     }
   }
 
+  private renderFieldConstructs(ctx: CanvasRenderingContext2D): void {
+    for (const c of this.fieldConstructs) {
+      const alpha = Math.max(0.15, Math.min(1, c.life / Math.min(c.maxLife, 0.55)));
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      switch (c.kind) {
+        case 'solar_ring': {
+          ctx.translate(c.x, c.y);
+          ctx.rotate(c.angle);
+          const grad = ctx.createRadialGradient(0, 0, c.radius * 0.25, 0, 0, c.radius);
+          grad.addColorStop(0, 'rgba(254, 240, 138, 0.32)');
+          grad.addColorStop(0.7, 'rgba(250, 204, 21, 0.16)');
+          grad.addColorStop(1, 'rgba(234, 179, 8, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = c.color;
+          ctx.lineWidth = 2.6;
+          ctx.setLineDash([12, 8]);
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          break;
+        }
+
+        case 'phantom_turret': {
+          ctx.translate(c.x, c.y);
+          ctx.strokeStyle = c.color;
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.arc(0, 0, 18 + Math.sin(this.elapsedTime * 10) * 2, 0, Math.PI * 2);
+          ctx.stroke();
+          this.drawCraftShape(
+            ctx,
+            0,
+            0,
+            c.angle,
+            0.85,
+            0.85,
+            false,
+            'phantom',
+            c.color,
+            c.secondaryColor
+          );
+          break;
+        }
+
+        case 'valkyrie_drill': {
+          ctx.translate(c.x, c.y);
+          ctx.rotate(c.angle);
+          ctx.fillStyle = c.color;
+          ctx.strokeStyle = '#FFF1F2';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(c.radius * 1.4, 0);
+          ctx.lineTo(-c.radius * 0.9, -c.radius * 0.65);
+          ctx.lineTo(-c.radius * 0.45, 0);
+          ctx.lineTo(-c.radius * 0.9, c.radius * 0.65);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          break;
+        }
+
+        case 'titan_dome': {
+          ctx.translate(c.x, c.y);
+          ctx.strokeStyle = c.color;
+          ctx.fillStyle = 'rgba(245, 158, 11, 0.1)';
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          for (let i = 0; i < 8; i++) {
+            const a = c.angle + (i * Math.PI * 2) / 8;
+            const rx = Math.cos(a) * c.radius;
+            const ry = Math.sin(a) * c.radius;
+            if (i === 0) ctx.moveTo(rx, ry);
+            else ctx.lineTo(rx, ry);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          break;
+        }
+
+        case 'lightning_pylon': {
+          ctx.translate(c.x, c.y);
+          ctx.strokeStyle = c.color;
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 8]);
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius * 0.45, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.rotate(c.angle);
+          ctx.fillStyle = '#0F172A';
+          ctx.strokeStyle = '#E0F2FE';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          for (let i = 0; i < 4; i++) {
+            const a = (i * Math.PI) / 2;
+            ctx.lineTo(Math.cos(a) * 16, Math.sin(a) * 16);
+            ctx.lineTo(Math.cos(a + Math.PI / 4) * 7, Math.sin(a + Math.PI / 4) * 7);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          break;
+        }
+
+        case 'gravity_well':
+        case 'traveling_blackhole': {
+          ctx.translate(c.x, c.y);
+          const grad = ctx.createRadialGradient(0, 0, 6, 0, 0, c.radius);
+          grad.addColorStop(0, '#020617');
+          grad.addColorStop(0.32, c.secondaryColor);
+          grad.addColorStop(0.75, 'rgba(168, 85, 247, 0.16)');
+          grad.addColorStop(1, 'rgba(15, 23, 42, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.rotate(c.angle);
+          ctx.strokeStyle = c.color;
+          ctx.lineWidth = 2.4;
+          for (let arm = 0; arm < 3; arm++) {
+            const baseA = (arm * Math.PI * 2) / 3;
+            ctx.beginPath();
+            ctx.arc(0, 0, c.radius * 0.55, baseA, baseA + 1.35);
+            ctx.stroke();
+          }
+          ctx.fillStyle = '#020617';
+          ctx.strokeStyle = '#F3E8FF';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, c.kind === 'traveling_blackhole' ? 18 : 13, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          break;
+        }
+
+        case 'nebula_mine': {
+          ctx.translate(c.x, c.y);
+          ctx.rotate(c.angle);
+          const pulse = 1 + Math.sin(this.elapsedTime * 14) * 0.2;
+          ctx.strokeStyle = c.color;
+          ctx.fillStyle = 'rgba(236, 72, 153, 0.25)';
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          for (let i = 0; i < 8; i++) {
+            const a = (i * Math.PI * 2) / 8;
+            const r = (i % 2 === 0 ? 15 : 8) * pulse;
+            const rx = Math.cos(a) * r;
+            const ry = Math.sin(a) * r;
+            if (i === 0) ctx.moveTo(rx, ry);
+            else ctx.lineTo(rx, ry);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          break;
+        }
+
+        case 'fire_wall': {
+          const grad = ctx.createRadialGradient(c.x, c.y, 2, c.x, c.y, c.radius);
+          grad.addColorStop(0, 'rgba(254, 240, 138, 0.85)');
+          grad.addColorStop(0.55, 'rgba(250, 204, 21, 0.45)');
+          grad.addColorStop(1, 'rgba(234, 88, 12, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+
+        case 'laser_gate': {
+          ctx.strokeStyle = c.color;
+          ctx.lineWidth = 10;
+          ctx.globalAlpha = alpha * 0.28;
+          ctx.beginPath();
+          ctx.moveTo(c.x, c.y);
+          ctx.lineTo(c.x2, c.y2);
+          ctx.stroke();
+
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = '#ECFDF5';
+          ctx.lineWidth = 3.2;
+          ctx.beginPath();
+          ctx.moveTo(c.x, c.y);
+          ctx.lineTo(c.x2, c.y2);
+          ctx.stroke();
+
+          ctx.fillStyle = c.color;
+          ctx.beginPath();
+          ctx.arc(c.x, c.y, 7, 0, Math.PI * 2);
+          ctx.arc(c.x2, c.y2, 7, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+
+        case 'time_dome': {
+          ctx.translate(c.x, c.y);
+          ctx.fillStyle = 'rgba(45, 212, 191, 0.09)';
+          ctx.strokeStyle = c.color;
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          // Clock hands inside dome
+          ctx.rotate(c.angle);
+          ctx.strokeStyle = 'rgba(204, 251, 241, 0.65)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(c.radius * 0.68, 0);
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, -c.radius * 0.45);
+          ctx.stroke();
+          break;
+        }
+
+        case 'colossal_orb': {
+          ctx.translate(c.x, c.y);
+          const grad = ctx.createRadialGradient(0, 0, 5, 0, 0, c.radius * 1.45);
+          grad.addColorStop(0, '#FFFFFF');
+          grad.addColorStop(0.35, c.color);
+          grad.addColorStop(0.75, c.secondaryColor);
+          grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius * 1.45, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.rotate(c.angle);
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2.8;
+          ctx.setLineDash([14, 10]);
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius * 0.9, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          break;
+        }
+
+        case 'judgment_beam': {
+          ctx.translate(c.x, c.y);
+          const pulseR = c.radius * (0.9 + Math.sin(this.elapsedTime * 22) * 0.15);
+          const grad = ctx.createRadialGradient(0, 0, 4, 0, 0, pulseR * 1.5);
+          grad.addColorStop(0, '#FFFFFF');
+          grad.addColorStop(0.45, c.color);
+          grad.addColorStop(1, 'rgba(253, 224, 71, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(0, 0, pulseR * 1.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Vertical sky beam pillar effect
+          ctx.fillStyle = 'rgba(254, 249, 195, 0.32)';
+          ctx.fillRect(-pulseR * 0.42, -this.height, pulseR * 0.84, this.height);
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, pulseR, 0, Math.PI * 2);
+          ctx.stroke();
+          break;
+        }
+
+        case 'ricochet_blade': {
+          ctx.translate(c.x, c.y);
+          ctx.rotate(c.angle);
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.fillStyle = c.color;
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          for (let i = 0; i < 4; i++) {
+            const a = (i * Math.PI) / 2;
+            ctx.lineTo(Math.cos(a) * c.radius, Math.sin(a) * c.radius);
+            ctx.lineTo(
+              Math.cos(a + Math.PI / 4) * (c.radius * 0.36),
+              Math.sin(a + Math.PI / 4) * (c.radius * 0.36)
+            );
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = c.secondaryColor;
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius * 0.26, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+
+        case 'colossal_slash': {
+          ctx.translate(c.x, c.y);
+          ctx.rotate(c.angle);
+          ctx.fillStyle = c.color;
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, c.radius, -1.18, 1.18, false);
+          ctx.arc(-c.radius * 0.35, 0, c.radius * 0.88, 1.05, -1.05, true);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          break;
+        }
+
+        case 'enemy_telegraph_beam': {
+          if (c.life > 0.35) {
+            // Telegraph warning laser line
+            ctx.strokeStyle = c.color;
+            ctx.lineWidth = 2.2;
+            ctx.setLineDash([10, 8]);
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y);
+            ctx.lineTo(c.x2, c.y2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          } else {
+            // High-intensity firing beam
+            ctx.strokeStyle = c.color;
+            ctx.lineWidth = c.radius * 1.4;
+            ctx.globalAlpha = 0.35;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y);
+            ctx.lineTo(c.x2, c.y2);
+            ctx.stroke();
+
+            ctx.globalAlpha = 0.95;
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = c.radius * 0.55;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y);
+            ctx.lineTo(c.x2, c.y2);
+            ctx.stroke();
+          }
+          break;
+        }
+      }
+
+      ctx.restore();
+    }
+  }
+
   private renderPlayer(ctx: CanvasRenderingContext2D): void {
-    if (this.gameState === 'GAME_OVER' && this.player.shields <= 0) return;
+    if (this.gameState === 'GAME_OVER' && this.player.hp <= 0) return;
 
     const p = this.player;
     const ship = SHIPS[this.shipId] ?? SHIPS.vanguard;
+    const scale = ship.hullScale ?? 1.0;
 
+    // 10-Second 3D Overdrive Ultimate Visuals around the player
     if (p.overdriveTimer > 0) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(253, 230, 138, 0.8)';
-      ctx.lineWidth = 2.5;
+      ctx.translate(p.x, p.y);
+
+      // Outer 3D dual rotating sacred/cyber halos
+      const r1 = (30 + Math.sin(this.elapsedTime * 14) * 4) * scale;
+      ctx.strokeStyle = ship.accentColor;
+      ctx.lineWidth = 2.8;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 24 + Math.sin(this.elapsedTime * 16) * 3, 0, Math.PI * 2);
+      ctx.arc(0, 0, r1, 0, Math.PI * 2);
       ctx.stroke();
+
+      ctx.save();
+      ctx.rotate(-this.elapsedTime * 3.5);
+      ctx.strokeStyle = ship.dashSecondaryColor;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([12, 8]);
+      ctx.beginPath();
+      ctx.arc(0, 0, r1 * 1.24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Ship-specific 10s Overdrive 3D effects attached to player
+      if (this.shipId === 'valkyrie') {
+        for (let b = 0; b < 3; b++) {
+          const ba = this.elapsedTime * 6.5 + (b * Math.PI * 2) / 3;
+          const bx = Math.cos(ba) * 105;
+          const by = Math.sin(ba) * 105;
+          ctx.save();
+          ctx.translate(bx, by);
+          ctx.rotate(ba + Math.PI / 2);
+          ctx.fillStyle = '#FB7185';
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(22, 0);
+          ctx.lineTo(-14, -9);
+          ctx.lineTo(-8, 0);
+          ctx.lineTo(-14, 9);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+        }
+      } else if (this.shipId === 'titan') {
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.75)';
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.12)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(0, 0, 128, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (this.shipId === 'solaris') {
+        const beamLen = 580;
+        const endX = Math.cos(p.angle) * beamLen;
+        const endY = Math.sin(p.angle) * beamLen;
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.35)';
+        ctx.lineWidth = 34;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#FEF9C3';
+        ctx.lineWidth = 12;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+      } else if (this.shipId === 'aether') {
+        for (let i = 0; i < 4; i++) {
+          const oa = this.elapsedTime * 3.8 + (i * Math.PI) / 2;
+          const ox = Math.cos(oa) * 125;
+          const oy = Math.sin(oa) * 125;
+          ctx.fillStyle = '#34D399';
+          ctx.strokeStyle = '#ECFDF5';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(ox, oy, 9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      } else if (this.shipId === 'hyperion') {
+        // Hyperion Pinball Ricochet Overdrive supersonic lightning aura
+        ctx.strokeStyle = '#FDE047';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+          const a = this.elapsedTime * 10 + (i * Math.PI) / 4;
+          const r = i % 2 === 0 ? 52 : 26;
+          const rx = Math.cos(a) * r;
+          const ry = Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(rx, ry);
+          else ctx.lineTo(rx, ry);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+
+      ctx.restore();
+    }
+
+    // Hold-[Q] Energy Charge-Burst Inward-Pulling Rings
+    if (p.isChargingDash && p.holdChargeTimer > 0.04) {
+      const chargeRatio = Math.min(1, p.holdChargeTimer / 1.05);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      const ringR = (54 - chargeRatio * 28) * scale;
+      ctx.strokeStyle = chargeRatio >= 0.99 ? '#FDE047' : ship.dashColor;
+      ctx.lineWidth = 2 + chargeRatio * 2.5;
+      ctx.setLineDash([8, 6]);
+      ctx.rotate(this.elapsedTime * (4 + chargeRatio * 10));
+      ctx.beginPath();
+      ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
       ctx.restore();
     }
 
@@ -4751,7 +5215,7 @@ export class StarwardEngine {
       ctx.lineWidth = 1.6;
       ctx.setLineDash([5, 4]);
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 21, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 22 * scale, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
@@ -4783,7 +5247,7 @@ export class StarwardEngine {
       p.dashTimer <= 0
     ) {
       ctx.save();
-      ctx.globalAlpha = 0.42;
+      ctx.globalAlpha = 0.48;
       this.drawCraftShape(
         ctx,
         p.x,
@@ -4810,17 +5274,43 @@ export class StarwardEngine {
       );
     }
 
+    // Tactical Micro-HP Bar & Hold-[Q] Charge Bar directly beneath player ship
+    if (this.gameState === 'PLAYING') {
+      const barW = 44 * Math.max(1, scale * 0.85);
+      const barH = 4.5;
+      const bx = p.x - barW * 0.5;
+      const by = p.y + 24 * scale + 6;
+      const hpRatio = Math.max(0, Math.min(1, p.hp / Math.max(1, p.maxHp)));
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.82)';
+      ctx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+
+      ctx.fillStyle =
+        hpRatio > 0.5 ? '#10B981' : hpRatio > 0.25 ? '#F59E0B' : '#EF4444';
+      ctx.fillRect(bx, by, barW * hpRatio, barH);
+
+      if (p.isChargingDash && p.holdChargeTimer > 0.04) {
+        const chargeRatio = Math.min(1, p.holdChargeTimer / 1.05);
+        ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+        ctx.fillRect(bx - 1, by + barH + 2, barW + 2, 4);
+        ctx.fillStyle = chargeRatio >= 0.99 ? '#FDE047' : ship.dashColor;
+        ctx.fillRect(bx, by + barH + 2.5, barW * chargeRatio, 3);
+      }
+      ctx.restore();
+    }
+
     // Precision PC Mouse Reticle
     if (this.hasPointerAim && this.gameState === 'PLAYING') {
       ctx.save();
-      ctx.strokeStyle = 'rgba(248, 250, 252, 0.42)';
-      ctx.lineWidth = 1.3;
+      ctx.strokeStyle = 'rgba(248, 250, 252, 0.45)';
+      ctx.lineWidth = 1.4;
       ctx.beginPath();
-      ctx.arc(this.mouseX, this.mouseY, 8, 0, Math.PI * 2);
+      ctx.arc(this.mouseX, this.mouseY, 9, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fillStyle = ship.accentColor;
       ctx.beginPath();
-      ctx.arc(this.mouseX, this.mouseY, 2.2, 0, Math.PI * 2);
+      ctx.arc(this.mouseX, this.mouseY, 2.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -4838,15 +5328,60 @@ export class StarwardEngine {
     accentColor: string,
     hullOverrideColor?: string
   ): void {
+    const shipDef = SHIPS[shipId] ?? SHIPS.vanguard;
+    const hullScale = shipDef.hullScale ?? 1.0;
+
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
-    ctx.scale(squashX, squashY);
+    ctx.scale(squashX * hullScale, squashY * hullScale);
 
-    ctx.fillStyle = flash ? 'rgba(255, 255, 255, 0.3)' : `${accentColor}22`;
+    ctx.fillStyle = flash ? 'rgba(255, 255, 255, 0.35)' : `${accentColor}24`;
     ctx.beginPath();
-    ctx.arc(0, 0, 20, 0, Math.PI * 2);
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
     ctx.fill();
+
+    // Mythic & High-Tier Outer Floating Rings / Blades before main hull
+    if (shipId === 'omega') {
+      ctx.strokeStyle = flash ? '#FFFFFF' : shipDef.dashSecondaryColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(-2, 0, 18, -Math.PI * 0.72, Math.PI * 0.72);
+      ctx.stroke();
+    } else if (shipId === 'celestia') {
+      ctx.strokeStyle = flash ? '#FFFFFF' : '#FDE047';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.arc(-5, 0, 21, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (shipId === 'hyperion') {
+      // Rotating laser shuriken halo
+      ctx.save();
+      ctx.rotate(this.elapsedTime * 5);
+      ctx.strokeStyle = flash ? '#FFFFFF' : '#FACC15';
+      ctx.lineWidth = 1.6;
+      ctx.strokeRect(-14, -14, 28, 28);
+      ctx.restore();
+    } else if (shipId === 'apocalypse') {
+      // Sovereign 100k Flagship floating Excalibur wing blades & sacred halo
+      ctx.strokeStyle = flash ? '#FFFFFF' : '#FACC15';
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      ctx.arc(-3, 0, 24, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = flash ? '#FFFFFF' : '#E11D48';
+      ctx.beginPath();
+      ctx.moveTo(10, -24);
+      ctx.lineTo(-16, -28);
+      ctx.lineTo(-10, -19);
+      ctx.closePath();
+      ctx.moveTo(10, 24);
+      ctx.lineTo(-16, 28);
+      ctx.lineTo(-10, 19);
+      ctx.closePath();
+      ctx.fill();
+    }
 
     ctx.fillStyle = flash ? '#FFFFFF' : hullOverrideColor ?? COLORS.playerFill;
     ctx.beginPath();
@@ -4932,6 +5467,81 @@ export class StarwardEngine {
         ctx.lineTo(-6, 15);
         ctx.lineTo(6, 15);
         break;
+      case 'omega':
+        // Heavy twin-prong siege dreadnought
+        ctx.moveTo(24, -4);
+        ctx.lineTo(14, -4);
+        ctx.lineTo(8, -17);
+        ctx.lineTo(-15, -15);
+        ctx.lineTo(-11, -5);
+        ctx.lineTo(-18, 0);
+        ctx.lineTo(-11, 5);
+        ctx.lineTo(-15, 15);
+        ctx.lineTo(8, 17);
+        ctx.lineTo(14, 4);
+        ctx.lineTo(24, 4);
+        ctx.lineTo(19, 0);
+        break;
+      case 'celestia':
+        // 6-wing seraphic angelic cruiser
+        ctx.moveTo(25, 0);
+        ctx.lineTo(9, -7);
+        ctx.lineTo(3, -20);
+        ctx.lineTo(-5, -11);
+        ctx.lineTo(-16, -18);
+        ctx.lineTo(-11, -5);
+        ctx.lineTo(-19, 0);
+        ctx.lineTo(-11, 5);
+        ctx.lineTo(-16, 18);
+        ctx.lineTo(-5, 11);
+        ctx.lineTo(3, 20);
+        ctx.lineTo(9, 7);
+        break;
+      case 'leviathan':
+        // Abyssal void dragon flagship with forward mandibles
+        ctx.moveTo(25, -5);
+        ctx.lineTo(13, -2);
+        ctx.lineTo(25, 5);
+        ctx.lineTo(6, 12);
+        ctx.lineTo(-4, 21);
+        ctx.lineTo(-17, 13);
+        ctx.lineTo(-12, 4);
+        ctx.lineTo(-20, 0);
+        ctx.lineTo(-12, -4);
+        ctx.lineTo(-17, -13);
+        ctx.lineTo(-4, -21);
+        ctx.lineTo(6, -12);
+        break;
+      case 'hyperion':
+        // 4-blade cybernetic flash shuriken interceptor
+        ctx.moveTo(26, 0);
+        ctx.lineTo(6, -7);
+        ctx.lineTo(2, -21);
+        ctx.lineTo(-5, -8);
+        ctx.lineTo(-20, -13);
+        ctx.lineTo(-11, 0);
+        ctx.lineTo(-20, 13);
+        ctx.lineTo(-5, 8);
+        ctx.lineTo(2, 21);
+        ctx.lineTo(6, 7);
+        break;
+      case 'apocalypse':
+        // 100.000 Mảnh Sao Sovereign Titan-God Flagship
+        ctx.moveTo(28, 0);
+        ctx.lineTo(15, -8);
+        ctx.lineTo(18, -16);
+        ctx.lineTo(2, -22);
+        ctx.lineTo(-6, -13);
+        ctx.lineTo(-19, -20);
+        ctx.lineTo(-14, -7);
+        ctx.lineTo(-22, 0);
+        ctx.lineTo(-14, 7);
+        ctx.lineTo(-19, 20);
+        ctx.lineTo(-6, 13);
+        ctx.lineTo(2, 22);
+        ctx.lineTo(18, 16);
+        ctx.lineTo(15, 8);
+        break;
       default:
         ctx.moveTo(18, 0);
         ctx.lineTo(-12, -11);
@@ -4943,14 +5553,22 @@ export class StarwardEngine {
     ctx.closePath();
     ctx.fill();
 
+    // Inner Armored Core & Reactor Gem
     ctx.fillStyle = flash ? '#FFFFFF' : accentColor;
     ctx.beginPath();
-    ctx.moveTo(9, 0);
-    ctx.lineTo(-5, -5);
-    ctx.lineTo(-2.5, 0);
-    ctx.lineTo(-5, 5);
+    ctx.moveTo(12, 0);
+    ctx.lineTo(-6, -6.5);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(-6, 6.5);
     ctx.closePath();
     ctx.fill();
+
+    if (hullScale >= 1.25) {
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(2, 0, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     ctx.restore();
   }
@@ -4982,27 +5600,92 @@ export class StarwardEngine {
     for (const b of this.enemyBullets) {
       if (!b.active) continue;
       ctx.save();
-      ctx.fillStyle = b.color;
-      ctx.globalAlpha = 0.28;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius + 4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.translate(b.x, b.y);
+      const ang = Math.atan2(b.vy, b.vx);
 
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = b.color;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
-      ctx.fill();
+      if (b.shape === 'lance') {
+        // Long plasma spear projectile
+        ctx.rotate(ang);
+        ctx.fillStyle = b.color;
+        ctx.globalAlpha = 0.3;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, b.radius * 2.6, b.radius * 0.95, 0, 0, Math.PI * 2);
+        ctx.fill();
 
-      ctx.fillStyle = '#FFF1F2';
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.radius * 0.42, 0, Math.PI * 2);
-      ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = b.color;
+        ctx.beginPath();
+        ctx.moveTo(b.radius * 2.2, 0);
+        ctx.lineTo(-b.radius * 1.4, -b.radius * 0.7);
+        ctx.lineTo(-b.radius * 0.8, 0);
+        ctx.lineTo(-b.radius * 1.4, b.radius * 0.7);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.moveTo(b.radius * 1.4, 0);
+        ctx.lineTo(-b.radius * 0.6, -b.radius * 0.28);
+        ctx.lineTo(-b.radius * 0.6, b.radius * 0.28);
+        ctx.closePath();
+        ctx.fill();
+      } else if (b.shape === 'crescent') {
+        // Sweeping scythe/crescent wave blade (destructible by player fire!)
+        ctx.rotate(ang);
+        ctx.fillStyle = b.color;
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius * 1.25, -1.15, 1.15, false);
+        ctx.arc(-b.radius * 0.45, 0, b.radius * 1.1, 1.0, -1.0, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (b.shape === 'mine') {
+        // Pulsing spiked bomb mine (destructible)
+        ctx.rotate(this.elapsedTime * 3.5);
+        const pulse = 1 + Math.sin(this.elapsedTime * 12) * 0.16;
+        ctx.fillStyle = b.color;
+        ctx.strokeStyle = '#FEF08A';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+          const a = (i * Math.PI * 2) / 8;
+          const r = (i % 2 === 0 ? b.radius * 1.28 : b.radius * 0.65) * pulse;
+          const rx = Math.cos(a) * r;
+          const ry = Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(rx, ry);
+          else ctx.lineTo(rx, ry);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        // High-contrast plasma core orb
+        ctx.fillStyle = b.color;
+        ctx.globalAlpha = 0.28;
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius + 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = b.color;
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#FFF1F2';
+        ctx.beginPath();
+        ctx.arc(0, 0, b.radius * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.restore();
     }
   }
 
   private renderEnemies(ctx: CanvasRenderingContext2D): void {
+    const armorTier = Math.min(3, Math.floor(this.wave / 4));
+
     for (const e of this.enemies) {
       const color = this.getEnemyColor(e);
 
@@ -5021,27 +5704,35 @@ export class StarwardEngine {
 
       if (e.isElite) {
         ctx.save();
-        ctx.strokeStyle = 'rgba(251, 191, 36, 0.7)';
-        ctx.lineWidth = 1.75;
-        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.75)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
         ctx.beginPath();
-        ctx.arc(e.x, e.y, e.radius + 6, 0, Math.PI * 2);
+        ctx.arc(e.x, e.y, e.radius + 7, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.restore();
       }
 
-      if ((e.type === 'charger' || e.type === 'shooter' || e.isBoss) && e.state === 'windup') {
-        const maxT = e.type === 'shooter' ? 0.65 : 0.75;
+      if (
+        (e.type === 'charger' ||
+          e.type === 'shooter' ||
+          e.type === 'sniper' ||
+          e.type === 'juggernaut' ||
+          e.isBoss) &&
+        e.state === 'windup'
+      ) {
+        const maxT = e.type === 'sniper' ? 0.95 : 0.75;
         const t = Math.max(0, Math.min(1, 1 - e.stateTimer / maxT));
         ctx.save();
         ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.28 + t * 0.6;
-        ctx.lineWidth = 1.5 + t * 1.5;
-        ctx.setLineDash([8, 6]);
+        ctx.globalAlpha = 0.3 + t * 0.65;
+        ctx.lineWidth = e.type === 'sniper' ? 2.4 : 1.5 + t * 1.5;
+        ctx.setLineDash(e.type === 'sniper' ? [14, 6] : [8, 6]);
         ctx.beginPath();
         ctx.moveTo(e.x, e.y);
-        ctx.lineTo(e.x + e.aimX * 340, e.y + e.aimY * 340);
+        const aimLen = e.type === 'sniper' ? 880 : 360;
+        ctx.lineTo(e.x + e.aimX * aimLen, e.y + e.aimY * aimLen);
         ctx.stroke();
         ctx.setLineDash([]);
 
@@ -5051,13 +5742,14 @@ export class StarwardEngine {
         ctx.restore();
       }
 
-      if (e.type === 'pulsar' && e.state === 'windup') {
-        const t = 1 - e.stateTimer / 0.85;
+      if ((e.type === 'pulsar' || e.type === 'vortex') && e.state === 'windup') {
+        const t = Math.max(0, Math.min(1, 1 - e.stateTimer / 0.85));
         ctx.save();
-        ctx.strokeStyle = `rgba(225, 29, 72, ${(0.3 + t * 0.6).toFixed(2)})`;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.35 + t * 0.55;
+        ctx.lineWidth = 2.2;
         ctx.beginPath();
-        ctx.arc(e.x, e.y, e.radius + 18 * (1 - t), 0, Math.PI * 2);
+        ctx.arc(e.x, e.y, e.radius + 22 * (1 - t), 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
@@ -5068,6 +5760,23 @@ export class StarwardEngine {
       ctx.scale(e.squash, 2 - e.squash);
 
       const flash = e.hitFlash > 0;
+
+      // Progressive Wave Armor Evolution Fin Plates for higher waves
+      if (armorTier >= 1 && !e.isBoss && e.type !== 'shardling') {
+        ctx.strokeStyle = flash ? '#FFFFFF' : color;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(0, 0, e.radius + 3.5, -0.8, 0.8);
+        if (armorTier >= 2) {
+          ctx.moveTo(-e.radius * 0.4, -e.radius * 1.15);
+          ctx.lineTo(e.radius * 0.3, -e.radius * 0.85);
+          ctx.moveTo(-e.radius * 0.4, e.radius * 1.15);
+          ctx.lineTo(e.radius * 0.3, e.radius * 0.85);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
 
       if (e.type === 'drifter') {
         ctx.fillStyle = flash ? '#FFFFFF' : color;
@@ -5104,6 +5813,68 @@ export class StarwardEngine {
         ctx.beginPath();
         ctx.arc(3, 0, 3.2, 0, Math.PI * 2);
         ctx.fill();
+      } else if (e.type === 'sniper') {
+        // Long railgun sniper craft
+        ctx.strokeStyle = flash ? '#FFFFFF' : color;
+        ctx.fillStyle = flash ? '#FFFFFF' : 'rgba(244, 63, 94, 0.26)';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(e.radius * 1.55, 0);
+        ctx.lineTo(-e.radius * 0.3, -e.radius * 0.85);
+        ctx.lineTo(-e.radius, -e.radius * 0.35);
+        ctx.lineTo(-e.radius * 0.7, 0);
+        ctx.lineTo(-e.radius, e.radius * 0.35);
+        ctx.lineTo(-e.radius * 0.3, e.radius * 0.85);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (e.type === 'bomber') {
+        // Heavy twin-pod mine layer
+        ctx.strokeStyle = flash ? '#FFFFFF' : color;
+        ctx.fillStyle = flash ? '#FFFFFF' : 'rgba(251, 146, 60, 0.26)';
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.roundRect(-e.radius * 0.9, -e.radius * 0.85, e.radius * 1.8, e.radius * 1.7, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#FEF08A';
+        ctx.beginPath();
+        ctx.arc(0, 0, e.radius * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (e.type === 'vortex') {
+        // Spinning gravitational ring entity
+        ctx.strokeStyle = flash ? '#FFFFFF' : color;
+        ctx.fillStyle = flash ? '#FFFFFF' : 'rgba(192, 132, 252, 0.24)';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        for (let s = 0; s < 6; s++) {
+          const a = (s * Math.PI * 2) / 6;
+          const r = s % 2 === 0 ? e.radius * 1.15 : e.radius * 0.65;
+          const rx = Math.cos(a) * r;
+          const ry = Math.sin(a) * r;
+          if (s === 0) ctx.moveTo(rx, ry);
+          else ctx.lineTo(rx, ry);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (e.type === 'juggernaut') {
+        // Armored siege dreadnought
+        ctx.strokeStyle = flash ? '#FFFFFF' : color;
+        ctx.fillStyle = flash ? '#FFFFFF' : 'rgba(52, 211, 153, 0.25)';
+        ctx.lineWidth = 3.2;
+        ctx.beginPath();
+        ctx.moveTo(e.radius * 1.2, -e.radius * 0.45);
+        ctx.lineTo(e.radius * 0.3, -e.radius * 1.05);
+        ctx.lineTo(-e.radius, -e.radius * 0.85);
+        ctx.lineTo(-e.radius * 0.8, 0);
+        ctx.lineTo(-e.radius, e.radius * 0.85);
+        ctx.lineTo(e.radius * 0.3, e.radius * 1.05);
+        ctx.lineTo(e.radius * 1.2, e.radius * 0.45);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
       } else if (e.type === 'tank') {
         ctx.strokeStyle = flash ? '#FFFFFF' : color;
         ctx.fillStyle = flash ? 'rgba(255,255,255,0.85)' : 'rgba(16, 185, 129, 0.22)';
@@ -5175,14 +5946,38 @@ export class StarwardEngine {
         ctx.fill();
         ctx.stroke();
       } else if (e.isBoss) {
+        // Multi-ring Boss Dreadnought Architecture
+        ctx.save();
+        ctx.rotate(-this.elapsedTime * 0.9);
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([12, 8]);
+        ctx.beginPath();
+        ctx.arc(0, 0, e.radius * 1.22, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+
         ctx.strokeStyle = flash ? '#FFFFFF' : color;
-        ctx.fillStyle = flash ? 'rgba(255,255,255,0.85)' : 'rgba(244, 63, 94, 0.2)';
-        ctx.lineWidth = 3.2;
-        const points = e.type === 'boss_hydra' ? 10 : 8;
+        ctx.fillStyle = flash ? 'rgba(255,255,255,0.85)' : `${color}33`;
+        ctx.lineWidth = 3.5;
+
+        const points =
+          e.type === 'boss_chronovore'
+            ? 12
+            : e.type === 'boss_hydra'
+            ? 10
+            : e.type === 'boss_valkyria'
+            ? 6
+            : 8;
         ctx.beginPath();
         for (let s = 0; s < points; s++) {
           const a = (s * Math.PI * 2) / points;
-          const r = s % 2 === 0 ? e.radius : e.radius * 0.72;
+          const r =
+            s % 2 === 0
+              ? e.radius * (e.type === 'boss_valkyria' ? 1.15 : 1.0)
+              : e.radius * (e.type === 'boss_valkyria' ? 0.55 : 0.72);
           const rx = Math.cos(a) * r;
           const ry = Math.sin(a) * r;
           if (s === 0) ctx.moveTo(rx, ry);
@@ -5194,7 +5989,7 @@ export class StarwardEngine {
 
         ctx.fillStyle = flash ? '#FFFFFF' : color;
         ctx.beginPath();
-        ctx.arc(0, 0, e.radius * 0.35, 0, Math.PI * 2);
+        ctx.arc(0, 0, e.radius * 0.36, 0, Math.PI * 2);
         ctx.fill();
       } else {
         ctx.fillStyle = flash ? '#FFFFFF' : COLORS.shardling;

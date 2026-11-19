@@ -26,19 +26,20 @@ export function ModalOverlay({
   const isPaused = gameState === 'PAUSED';
   const modeInfo = GAME_MODES.find((m) => m.id === hud.mode) ?? GAME_MODES[0];
   const shipInfo = SHIPS[hud.shipId] ?? SHIPS.vanguard;
+  const stats = hud.liveStats;
 
   return (
     <div
-      className="fixed inset-0 z-20 flex items-center justify-center p-4 bg-[#05080F]/80"
+      className="fixed inset-0 z-20 flex items-center justify-center p-4 bg-[#05080F]/82"
       role="dialog"
       aria-modal="true"
       aria-labelledby="game-modal-title"
     >
-      <div className="w-full max-w-lg rounded-xl bg-[#0F172A] border border-slate-700/80 p-6 sm:p-8 shadow-2xl">
-        <div className="flex items-start justify-between gap-4 mb-5">
+      <div className="w-full max-w-xl rounded-xl bg-[#0F172A] border border-slate-700/80 p-6 sm:p-7 shadow-2xl">
+        <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <div className="text-xs font-mono text-amber-400 mb-1">
-              {modeInfo.name.toUpperCase()} · {shipInfo.name.toUpperCase()}
+              {modeInfo.name.toUpperCase()} · {shipInfo.name.toUpperCase()} ({hud.hp}/{hud.maxHp} HP)
             </div>
             <h2 id="game-modal-title" className="font-display text-2xl sm:text-3xl font-bold text-slate-50">
               {isPaused ? 'Tạm Dừng Chiến Dịch' : 'Tổng Kết Chiến Dịch'}
@@ -48,7 +49,7 @@ export function ModalOverlay({
                 ? 'Nhấn Esc hoặc Tiếp Tục để quay lại chiến trường.'
                 : hud.isNewBest
                 ? 'Chúc mừng! Bạn vừa thiết lập kỷ lục điểm số mới.'
-                : 'Lớp khiên bảo vệ đã cạn kiệt. Mảnh Sao đã được chuyển về Hangar.'}
+                : 'Thanh Máu (HP) của chiến cơ đã cạn kiệt. Mảnh Sao đã được chuyển về Hangar.'}
             </p>
           </div>
 
@@ -67,24 +68,24 @@ export function ModalOverlay({
         </div>
 
         {/* Summary metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 mb-5 border-y border-slate-800 py-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4 border-y border-slate-800 py-3.5">
           <div>
             <div className="text-xs text-slate-400 mb-0.5">Điểm Trận Này</div>
             <div className="font-mono text-xl font-bold text-slate-50 tabular-nums">
-              {hud.score.toLocaleString()}
+              {hud.score.toLocaleString('vi-VN')}
             </div>
           </div>
           <div>
             <div className="text-xs text-slate-400 mb-0.5">Kỷ Lục Chế Độ</div>
             <div className="font-mono text-xl font-bold text-amber-400 tabular-nums">
-              {hud.bestScore.toLocaleString()}
+              {hud.bestScore.toLocaleString('vi-VN')}
             </div>
           </div>
           <div>
             <div className="text-xs text-slate-400 mb-0.5">Mảnh Sao Thu Được</div>
             <div className="font-mono text-xl font-bold text-emerald-400 tabular-nums inline-flex items-center gap-1">
               <Sparkles className="w-4 h-4" />
-              <span>+{hud.runShards.toLocaleString()}</span>
+              <span>+{hud.runShards.toLocaleString('vi-VN')}</span>
             </div>
           </div>
           <div>
@@ -96,24 +97,63 @@ export function ModalOverlay({
           <div>
             <div className="text-xs text-slate-400 mb-0.5">Quái Đã Hạ</div>
             <div className="font-mono text-base font-semibold text-slate-200 tabular-nums">
-              {hud.enemiesDefeated.toLocaleString()}
+              {hud.enemiesDefeated.toLocaleString('vi-VN')}
             </div>
           </div>
           <div>
             <div className="text-xs text-slate-400 mb-0.5">Boss Đã Diệt</div>
             <div className="font-mono text-base font-semibold text-rose-400 tabular-nums">
-              {hud.bossesDefeated.toLocaleString()}
+              {hud.bossesDefeated.toLocaleString('vi-VN')}
+            </div>
+          </div>
+        </div>
+
+        {/* Live Upgraded Combat Stats Summary in Pause / Game Over */}
+        <div className="mb-4 p-3 rounded-lg bg-slate-900/90 border border-cyan-500/30">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-cyan-300 font-bold mb-2">
+            ⚡ CHỈ SỐ ĐÃ NÂNG CẤP TRONG TRẬN
+          </div>
+          <div className="grid grid-cols-3 gap-2 font-mono text-xs">
+            <div>
+              <span className="text-slate-400 text-[10px] block">Sát Thương</span>
+              <span className="text-amber-300 font-bold">
+                {stats.damageBonusPct >= 0 ? `+${stats.damageBonusPct}%` : `${stats.damageBonusPct}%`}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-[10px] block">Tốc Độ Bắn</span>
+              <span className="text-cyan-300 font-bold">
+                {stats.fireRateBonusPct >= 0 ? `+${stats.fireRateBonusPct}%` : `${stats.fireRateBonusPct}%`}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-[10px] block">Tốc Độ Bay</span>
+              <span className="text-emerald-300 font-bold">
+                {stats.speedBonusPct >= 0 ? `+${stats.speedBonusPct}%` : `${stats.speedBonusPct}%`}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-[10px] block">Máu Cộng Thêm</span>
+              <span className="text-emerald-400 font-bold">+{stats.bonusMaxHp} HP (+{stats.hpRegenPerSec}/s)</span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-[10px] block">Đạn &amp; Xuyên Phá</span>
+              <span className="text-purple-300 font-bold">+{stats.extraBarrels} Nòng · +{stats.bonusPierce} Xuyên</span>
+            </div>
+            <div>
+              <span className="text-slate-400 text-[10px] block">Hồi Lướt &amp; Hút</span>
+              <span className="text-yellow-300 font-bold">{stats.dashCooldownSec}s · {stats.magnetRadiusPx}px</span>
             </div>
           </div>
         </div>
 
         {/* Active Perks collected during the run */}
         {hud.activePerks.length > 0 && (
-          <div className="mb-6">
-            <div className="text-xs text-slate-400 mb-1.5">
-              Nâng cấp đã trang bị trong trận ({hud.activePerks.length}):
+          <div className="mb-5">
+            <div className="text-xs text-slate-400 mb-1">
+              Lõi nâng cấp đã lắp trong trận ({hud.activePerks.length}):
             </div>
-            <div className="text-xs text-slate-300 leading-relaxed">
+            <div className="text-xs text-cyan-200 leading-relaxed">
               {hud.activePerks.join(' · ')}
             </div>
           </div>
@@ -155,7 +195,7 @@ export function ModalOverlay({
                 className="inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 text-sm font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-400 cursor-pointer whitespace-nowrap"
               >
                 <Rocket className="w-4 h-4" />
-                <span>Nâng Cấp Hangar</span>
+                <span>Xưởng Chiến Cơ Hangar</span>
               </button>
             )}
 
